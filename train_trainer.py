@@ -5,6 +5,8 @@ from diffusers import StableVideoDiffusionPipeline
 from PIL import Image
 import numpy as np
 import cv2
+import os
+os.environ["WANDB_DISABLED"] = "true"
 
 class ImageVideoDataset(Dataset):
     def __init__(self, image_path, video_path):
