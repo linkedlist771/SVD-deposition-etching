@@ -47,6 +47,7 @@ class VideoDataCollator:
 pipe = StableVideoDiffusionPipeline.from_pretrained(
     "stabilityai/stable-video-diffusion-img2vid-xt", torch_dtype=torch.float16, variant="fp16"
 )
+print(dir(pipe))
 pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 
 # 获取模型组件
