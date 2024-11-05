@@ -16,8 +16,11 @@ class ImageVideoDataset(Dataset):
         return len(self.video_frames)
 
     def __getitem__(self, idx):
-        frame = self.video_frames[idx]
-        return {"input_image": self.image, "target_frame": frame}
+        # Return a dictionary with the correct keys
+        return {
+            "input_images": self.image,  # Changed from input_image to input_images
+            "target_frames": self.video_frames[idx]  # Changed from target_frame to target_frames
+        }
 
     def load_video_frames(self, video_path):
         cap = cv2.VideoCapture(video_path)
@@ -34,9 +37,13 @@ class ImageVideoDataset(Dataset):
 
 class VideoDataCollator:
     def __call__(self, examples):
-        input_images = [example["input_image"] for example in examples]
-        target_frames = [example["target_frame"] for example in examples]
-        return {"input_images": input_images, "target_frames": target_frames}
+        # Access the correct keys from the dataset
+        input_images = [example["input_images"] for example in examples]
+        target_frames = [example["target_frames"] for example in examples]
+        return {
+            "input_images": input_images,
+            "target_frames": target_frames
+        }
 
 # Load pipeline
 pipe = StableVideoDiffusionPipeline.from_pretrained(
@@ -117,6 +124,8 @@ training_args = TrainingArguments(
     logging_steps=10,
     learning_rate=5e-5,
     fp16=True,
+    report_to=None,  # 禁用所有报告工具，包括wandb
+
 )
 
 # Initialize trainer
