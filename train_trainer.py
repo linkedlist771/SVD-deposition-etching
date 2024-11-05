@@ -11,15 +11,17 @@ os.environ["WANDB_DISABLED"] = "true"
 class ImageVideoDataset(Dataset):
     def __init__(self, image_path, video_path):
         self.image = Image.open(image_path).convert("RGB")
+        self.image = self.image.resize((1024, 576))
         self.video_frames = self.load_video_frames(video_path)
 
     def __len__(self):
         return len(self.video_frames)
 
     def __getitem__(self, idx):
+        # Return a dictionary with the correct keys
         return {
-            "input_images": self.image,
-            "target_frames": self.video_frames[idx]
+            "input_images": self.image,  # Changed from input_image to input_images
+            "target_frames": self.video_frames[idx]  # Changed from target_frame to target_frames
         }
 
     def load_video_frames(self, video_path):
@@ -29,6 +31,7 @@ class ImageVideoDataset(Dataset):
         while success:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pil_image = Image.fromarray(frame)
+            pil_image = pil_image.resize((1024, 576))
             frames.append(pil_image)
             success, frame = cap.read()
         cap.release()
@@ -36,6 +39,7 @@ class ImageVideoDataset(Dataset):
 
 class VideoDataCollator:
     def __call__(self, examples):
+        # Access the correct keys from the dataset
         input_images = [example["input_images"] for example in examples]
         target_frames = [example["target_frames"] for example in examples]
         return {
@@ -56,16 +60,16 @@ vae = pipe.vae
 unet = pipe.unet
 scheduler = pipe.scheduler
 image_encoder = pipe.image_encoder
-image_processor = pipe.image_processor  # Use the image_processor
+video_processor = pipe.video_processor
 
 class VideoDiffusionModel(torch.nn.Module):
-    def __init__(self, vae, unet, scheduler, image_encoder, image_processor):
+    def __init__(self, vae, unet, scheduler, image_encoder, video_processor):
         super().__init__()
         self.vae = vae.eval()
         self.unet = unet
         self.scheduler = scheduler
         self.image_encoder = image_encoder.eval()
-        self.image_processor = image_processor
+        self.video_processor = video_processor
 
         # Freeze VAE and image encoder parameters
         for param in self.vae.parameters():
@@ -76,14 +80,17 @@ class VideoDiffusionModel(torch.nn.Module):
     def forward(self, input_images, target_frames):
         device = self.unet.device
 
-        # Process input images using image_processor
-        input_images = self.image_processor(images=input_images, return_tensors="pt").pixel_values.to(device)
+        # Process input images using video_processor
+        input_images = torch.stack([torch.tensor(np.array(img)).permute(2, 0, 1).float() / 255.0 
+                                  for img in input_images]).to(device)
+        input_images = (input_images - 0.5) * 2  # Normalize to [-1, 1]
 
         # Get encoder hidden states
         encoder_hidden_states = self.image_encoder(input_images).last_hidden_state
 
         # Process target frames
-        target_frames = self.image_processor(images=target_frames, return_tensors="pt").pixel_values.to(device)
+        target_frames = [torch.tensor(np.array(img)).permute(2, 0, 1).float() / 255.0 for img in target_frames]
+        target_frames = torch.stack(target_frames).to(device)
         target_frames = (target_frames - 0.5) * 2  # Normalize to [-1, 1]
 
         # Encode target frames
@@ -103,11 +110,11 @@ class VideoDiffusionModel(torch.nn.Module):
         return {"loss": loss}
 
 # Initialize model
-model = VideoDiffusionModel(vae, unet, scheduler, image_encoder, image_processor)
+model = VideoDiffusionModel(vae, unet, scheduler, image_encoder, video_processor)
 model.to("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load dataset
-dataset = ImageVideoDataset("assets/rocket.png", "generated.mp4")
+dataset = ImageVideoDataset("assests/rocket.png", "generated.mp4")
 
 # Training arguments
 training_args = TrainingArguments(
@@ -118,7 +125,8 @@ training_args = TrainingArguments(
     logging_steps=10,
     learning_rate=5e-5,
     fp16=True,
-    report_to=[],  # Disable all reporting tools, including wandb
+    report_to=None,  # 禁用所有报告工具，包括wandb
+
 )
 
 # Initialize trainer
