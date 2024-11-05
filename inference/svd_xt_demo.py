@@ -1,6 +1,7 @@
 import torch
 
 from diffusers import StableVideoDiffusionPipeline
+from PIL import Image
 from diffusers.utils import load_image, export_to_video
 
 pipe = StableVideoDiffusionPipeline.from_pretrained(
@@ -9,7 +10,7 @@ pipe = StableVideoDiffusionPipeline.from_pretrained(
 pipe.enable_model_cpu_offload()
 
 # Load the conditioning image
-image = load_image("../assests/rocket.png")
+image = Image.open("../assests/rocket.png")
 image = image.resize((1024, 576))
 
 generator = torch.manual_seed(42)
