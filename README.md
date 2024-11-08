@@ -4,8 +4,8 @@
 ## 1. 单卡训练
 ```bash
 accelerate launch train_svd.py \
-    --base_folder=assets \
-    --pretrained_model_name_or_path=models/stable-video-diffusion-img2vid \
+    --base_folder=data \
+    --pretrained_model_name_or_path=stable-video-diffusion-img2vid \
     --per_gpu_batch_size=1 \
     --gradient_accumulation_steps=1 \
     --max_train_steps=50000 \
