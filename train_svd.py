@@ -143,6 +143,8 @@ class DummyDataset(Dataset):
         for i, frame_name in enumerate(selected_frames):
             frame_path = os.path.join(folder_path, frame_name)
             with Image.open(frame_path) as img:
+                img = img.convert('RGB') # TODO: this is hack , other wise the VAE fails
+
                 # Resize the image and convert it to a tensor
                 img_resized = img.resize((self.width, self.height))
                 img_tensor = torch.from_numpy(np.array(img_resized)).float()
