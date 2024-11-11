@@ -14,16 +14,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Fine-tuning script for Stable Video Diffusion with support for LoRA."""
+"""Script to fine-tune Stable Video Diffusion."""
 import argparse
 import random
 import logging
 import math
 import os
+import re
+
 import cv2
 import shutil
 from pathlib import Path
 from urllib.parse import urlparse
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    MixedPrecision,
+    BackwardPrefetch,
+    ShardingStrategy,
+    CPUOffload,
+)
+from torch.distributed.fsdp.wrap import (
+    size_based_auto_wrap_policy,
+    enable_wrap,
+    wrap,
+)
 
 import accelerate
 import numpy as np
@@ -46,26 +60,21 @@ from einops import rearrange
 import diffusers
 from diffusers import StableVideoDiffusionPipeline
 from diffusers.models.lora import LoRALinearLayer
-from diffusers import AutoencoderKLTemporalDecoder
-from diffusers.optimization import get_scheduler
-from diffusers.utils import (
-    check_min_version,
-    convert_state_dict_to_diffusers,
-    is_wandb_available,
-    load_image,
+from diffusers import (
+    AutoencoderKLTemporalDecoder,
+    EulerDiscreteScheduler,
+    UNetSpatioTemporalConditionModel,
 )
+from diffusers.image_processor import VaeImageProcessor
+from diffusers.optimization import get_scheduler
+from diffusers.training_utils import EMAModel
+from diffusers.utils import check_min_version, deprecate, is_wandb_available, load_image
 from diffusers.utils.import_utils import is_xformers_available
 
 from torch.utils.data import Dataset
 
-from peft import LoraConfig
-from peft.utils import get_peft_model_state_dict
-from diffusers.training_utils import cast_training_params
-
-from src.unet_spatio_temporal_condition import UNetSpatioTemporalConditionModel
-
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.29.1")
+check_min_version("0.24.0.dev0")
 
 logger = get_logger(__name__, log_level="INFO")
 
@@ -75,6 +84,37 @@ def rand_log_normal(shape, loc=0.0, scale=1.0, device="cpu", dtype=torch.float32
     """Draws samples from an lognormal distribution."""
     u = torch.rand(shape, dtype=dtype, device=device) * (1 - 2e-7) + 1e-7
     return torch.distributions.Normal(loc, scale).icdf(u).exp()
+
+
+def create_model_parallel(args):
+    # 定义混合精度策略
+    mixed_precision_policy = MixedPrecision(
+        param_dtype=torch.float16,
+        reduce_dtype=torch.float16,
+        buffer_dtype=torch.float16,
+    )
+
+    # 设置FSDP包装策略
+    wrapping_policy = size_based_auto_wrap_policy(min_num_params=100000)
+
+    # 加载模型
+    unet = UNetSpatioTemporalConditionModel.from_pretrained(
+        args.pretrained_model_name_or_path if args.pretrain_unet is None else args.pretrain_unet,
+        subfolder="unet",
+        low_cpu_mem_usage=True,
+        variant="fp16",
+    )
+    # 用FSDP包装模型
+    unet = FSDP(
+        unet,
+        auto_wrap_policy=wrapping_policy,
+        mixed_precision=mixed_precision_policy,
+        sharding_strategy=ShardingStrategy.FULL_SHARD,
+        device_id=torch.cuda.current_device(),
+    )
+
+    return unet
+
 
 
 class DummyDataset(Dataset):
@@ -103,6 +143,13 @@ class DummyDataset(Dataset):
     def __len__(self):
         return self.num_samples
 
+    def natural_sort_key(self, s):
+        """按照自然数顺序排序文件名"""
+        return [
+            int(text) if text.isdigit() else text.lower()
+            for text in re.split("([0-9]+)", s)
+        ]
+
     def __getitem__(self, idx):
         """
         Args:
@@ -115,8 +162,10 @@ class DummyDataset(Dataset):
         chosen_folder = random.choice(self.folders)
         folder_path = os.path.join(self.base_folder, chosen_folder)
         frames = os.listdir(folder_path)
+        frames.sort(key=self.natural_sort_key)
+
         # Sort the frames by name
-        frames.sort()
+        # frames.sort()  # TODO： sort in the int way
 
         # Ensure the selected folder has at least `sample_frames`` frames
         if len(frames) < self.sample_frames:
@@ -453,6 +502,19 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--use_ema", action="store_true", help="Whether to use EMA model."
+    )
+    parser.add_argument(
+        "--non_ema_revision",
+        type=str,
+        default=None,
+        required=False,
+        help=(
+            "Revision of pretrained non-ema model identifier. Must be a branch, tag or git identifier of the local or"
+            " remote repository specified with --pretrained_model_name_or_path."
+        ),
+    )
+    parser.add_argument(
         "--num_workers",
         type=int,
         default=8,
@@ -573,16 +635,33 @@ def parse_args():
         help="use weight for unet block",
     )
     parser.add_argument(
-        "--rank",
-        type=int,
-        default=4,
-        help=("The dimension of the LoRA update matrices."),
+        "--fsdp_sharding_strategy",
+        type=str,
+        default="FULL_SHARD",
+        help="FSDP sharding strategy",
     )
+    parser.add_argument(
+        "--fsdp_min_num_params",
+        type=int,
+        default=100000,
+        help="FSDP minimum number of parameters for auto wrapping",
+    )
+    parser.add_argument(
+        "--fsdp_backward_prefetch",
+        type=str,
+        default="BACKWARD_PRE",
+        help="FSDP backward prefetch policy",
+    )
+
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
         args.local_rank = env_local_rank
+
+    # default to using the same revision for the non-ema model if not specified
+    if args.non_ema_revision is None:
+        args.non_ema_revision = args.revision
 
     return args
 
@@ -601,6 +680,15 @@ def download_image(url):
 def main():
     args = parse_args()
 
+    if args.non_ema_revision is not None:
+        deprecate(
+            "non_ema_revision!=None",
+            "0.15.0",
+            message=(
+                "Downloading 'non_ema' weights from revision branches of the Hub is deprecated. Please make sure to"
+                " use `--variant=non_ema` instead."
+            ),
+        )
     logging_dir = os.path.join(args.output_dir, args.logging_dir)
     accelerator_project_config = ProjectConfiguration(
         project_dir=args.output_dir, logging_dir=logging_dir
@@ -670,16 +758,18 @@ def main():
         revision=args.revision,
         variant="fp16",
     )
-    unet = UNetSpatioTemporalConditionModel.from_pretrained(
-        (
-            args.pretrained_model_name_or_path
-            if args.pretrain_unet is None
-            else args.pretrain_unet
-        ),
-        subfolder="unet",
-        low_cpu_mem_usage=True,
-        variant="fp16",
-    )
+    # unet = UNetSpatioTemporalConditionModel.from_pretrained(
+    #     (
+    #         args.pretrained_model_name_or_path
+    #         if args.pretrain_unet is None
+    #         else args.pretrain_unet
+    #     ),
+    #     subfolder="unet",
+    #     low_cpu_mem_usage=True,
+    #     variant="fp16",
+    # )
+    unet = create_model_parallel(args)
+
 
     # Freeze vae and image_encoder
     vae.requires_grad_(False)
@@ -694,26 +784,17 @@ def main():
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
 
-    # Freeze the unet parameters before adding adapters
-    for param in unet.parameters():
-        param.requires_grad_(False)
-
-    unet_lora_config = LoraConfig(
-        r=args.rank,
-        lora_alpha=args.rank,
-        init_lora_weights="gaussian",
-        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
-    )
-
     # Move image_encoder and vae to gpu and cast to weight_dtype
     image_encoder.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
-    unet.to(accelerator.device, dtype=weight_dtype)
 
-    unet.add_adapter(unet_lora_config)
-    if args.mixed_precision == "fp16":
-        # only upcast trainable parameters (LoRA) into fp32
-        cast_training_params(unet, dtype=torch.float32)
+    # Create EMA for the unet.
+    if args.use_ema:
+        ema_unet = EMAModel(
+            unet.parameters(),
+            model_cls=UNetSpatioTemporalConditionModel,
+            model_config=unet.config,
+        )
 
     if args.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
@@ -734,6 +815,8 @@ def main():
     if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
         # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
         def save_model_hook(models, weights, output_dir):
+            if args.use_ema:
+                ema_unet.save_pretrained(os.path.join(output_dir, "unet_ema"))
 
             for i, model in enumerate(models):
                 model.save_pretrained(os.path.join(output_dir, "unet"))
@@ -742,6 +825,15 @@ def main():
                 weights.pop()
 
         def load_model_hook(models, input_dir):
+            if args.use_ema:
+                load_model = EMAModel.from_pretrained(
+                    os.path.join(input_dir, "unet_ema"),
+                    UNetSpatioTemporalConditionModel,
+                )
+                ema_unet.load_state_dict(load_model.state_dict())
+                ema_unet.to(accelerator.device)
+                del load_model
+
             for i in range(len(models)):
                 # pop models so that they are not loaded again
                 model = models.pop()
@@ -787,9 +879,18 @@ def main():
     else:
         optimizer_cls = torch.optim.AdamW
 
-    lora_layers = filter(lambda p: p.requires_grad, unet.parameters())
+    parameters_list = []
+
+    # Customize the parameters that need to be trained; if necessary, you can uncomment them yourself.
+    for name, param in unet.named_parameters():
+        if "temporal_transformer_block" in name:
+            parameters_list.append(param)
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
     optimizer = optimizer_cls(
-        lora_layers,
+        # parameters_list,
+        unet.parameters(),
         lr=args.learning_rate,
         betas=(args.adam_beta1, args.adam_beta2),
         weight_decay=args.adam_weight_decay,
@@ -846,11 +947,15 @@ def main():
         unet, optimizer, lr_scheduler, train_dataloader
     )
 
+    if args.use_ema:
+        ema_unet.to(accelerator.device)
+
     # attribute handling for models using DDP
     if isinstance(
         unet, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)
     ):
         unet = unet.module
+
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(
         len(train_dataloader) / args.gradient_accumulation_steps
@@ -980,7 +1085,9 @@ def main():
                     .to(weight_dtype)
                     .to(accelerator.device, non_blocking=True)
                 )
-                conditional_pixel_values = pixel_values[:, 0:1, :, :, :]
+                conditional_pixel_values = pixel_values[
+                    :, 0:1, :, :, :
+                ]  #  这行代码是在从输入的视频帧张量中提取第一帧作为条件帧， 也就是作为输入。
 
                 latents = tensor_to_vae_latent(pixel_values, vae)
 
@@ -1121,6 +1228,8 @@ def main():
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
+                if args.use_ema:
+                    ema_unet.step(unet.parameters())
                 progress_bar.update(1)
                 global_step += 1
                 accelerator.log({"train_loss": train_loss}, step=global_step)
@@ -1164,24 +1273,16 @@ def main():
                         )
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
-
-                        unwrapped_unet = accelerator.unwrap_model(unet)
-                        unet_lora_state_dict = convert_state_dict_to_diffusers(
-                            get_peft_model_state_dict(unwrapped_unet)
-                        )
-
-                        StableVideoDiffusionPipeline.save_lora_weights(
-                            save_directory=save_path,
-                            unet_lora_layers=unet_lora_state_dict,
-                            safe_serialization=True,
-                        )
-
-                        logger.info(f"Saved state to {save_path}")
                     # sample images!
                     if (global_step % args.validation_steps == 0) or (global_step == 1):
                         logger.info(
                             f"Running validation... \n Generating {args.num_validation_images} videos."
                         )
+                        # create pipeline
+                        if args.use_ema:
+                            # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
+                            ema_unet.store(unet.parameters())
+                            ema_unet.copy_to(unet.parameters())
                         # The models need unwrapping because for compatibility in distributed training mode.
                         pipeline = StableVideoDiffusionPipeline.from_pretrained(
                             args.pretrained_model_name_or_path,
@@ -1209,7 +1310,7 @@ def main():
                             for val_img_idx in range(args.num_validation_images):
                                 num_frames = args.num_frames
                                 video_frames = pipeline(
-                                    load_image("demo.jpg").resize(
+                                    load_image("demo.png").resize(
                                         (args.width, args.height)
                                     ),
                                     height=args.height,
@@ -1232,6 +1333,10 @@ def main():
                                     video_frames[i] = np.array(img)
                                 export_to_gif(video_frames, out_file, 8)
 
+                        if args.use_ema:
+                            # Switch back to the original UNet parameters.
+                            ema_unet.restore(unet.parameters())
+
                         del pipeline
                         torch.cuda.empty_cache()
 
@@ -1247,17 +1352,18 @@ def main():
     # Create the pipeline using the trained modules and save it.
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        unet = unet.to(torch.float32)
+        unet = accelerator.unwrap_model(unet)
+        if args.use_ema:
+            ema_unet.copy_to(unet.parameters())
 
-        unwrapped_unet = accelerator.unwrap_model(unet)
-        unet_lora_state_dict = convert_state_dict_to_diffusers(
-            get_peft_model_state_dict(unwrapped_unet)
+        pipeline = StableVideoDiffusionPipeline.from_pretrained(
+            args.pretrained_model_name_or_path,
+            image_encoder=accelerator.unwrap_model(image_encoder),
+            vae=accelerator.unwrap_model(vae),
+            unet=unet,
+            revision=args.revision,
         )
-        StableVideoDiffusionPipeline.save_lora_weights(
-            save_directory=args.output_dir,
-            unet_lora_layers=unet_lora_state_dict,
-            safe_serialization=True,
-        )
+        pipeline.save_pretrained(args.output_dir)
 
         if args.push_to_hub:
             upload_folder(
