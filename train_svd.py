@@ -1250,118 +1250,122 @@ def main():
                         val_outputs_current = []  # 当前步骤的临时存储
 
                         # Add validation loop
-                        for val_step, val_batch in enumerate(val_dataloader):
-                            with torch.no_grad():
-                                # Copy validation logic from training step
-                                pixel_values = val_batch["pixel_values"].to(weight_dtype).to(accelerator.device,
-                                                                                             non_blocking=True)
-                                conditional_pixel_values = pixel_values[:, 0:1, :, :, :]
+                        # Add tqdm progress bar for validation
+                        with tqdm(val_dataloader, desc="Validation", leave=False) as val_pbar:
+                            for val_step, val_batch in enumerate(val_pbar):
+                                # for val_step, val_batch in enumerate(val_dataloader):
+                                with torch.no_grad():
+                                    # Copy validation logic from training step
+                                    pixel_values = val_batch["pixel_values"].to(weight_dtype).to(accelerator.device,
+                                                                                                 non_blocking=True)
+                                    conditional_pixel_values = pixel_values[:, 0:1, :, :, :]
 
-                                # Convert images to latent space
-                                latents = tensor_to_vae_latent(pixel_values, vae)
+                                    # Convert images to latent space
+                                    latents = tensor_to_vae_latent(pixel_values, vae)
 
-                                # Sample noise
-                                noise = torch.randn_like(latents)
-                                bsz = latents.shape[0]
+                                    # Sample noise
+                                    noise = torch.randn_like(latents)
+                                    bsz = latents.shape[0]
 
-                                # Calculate condition sigmas
-                                cond_sigmas = rand_log_normal(
-                                    shape=[bsz, ],
-                                    loc=-3.0,
-                                    scale=0.5
-                                ).to(latents)
-                                noise_aug_strength = cond_sigmas[0]
-                                cond_sigmas = cond_sigmas[:, None, None, None, None]
+                                    # Calculate condition sigmas
+                                    cond_sigmas = rand_log_normal(
+                                        shape=[bsz, ],
+                                        loc=-3.0,
+                                        scale=0.5
+                                    ).to(latents)
+                                    noise_aug_strength = cond_sigmas[0]
+                                    cond_sigmas = cond_sigmas[:, None, None, None, None]
 
-                                # Add noise to conditional frames
-                                conditional_pixel_values = torch.randn_like(
-                                    conditional_pixel_values) * cond_sigmas + conditional_pixel_values
-                                conditional_latents = tensor_to_vae_latent(conditional_pixel_values, vae)[:, 0, :, :, :]
-                                conditional_latents = conditional_latents / vae.config.scaling_factor
+                                    # Add noise to conditional frames
+                                    conditional_pixel_values = torch.randn_like(
+                                        conditional_pixel_values) * cond_sigmas + conditional_pixel_values
+                                    conditional_latents = tensor_to_vae_latent(conditional_pixel_values, vae)[:, 0, :, :, :]
+                                    conditional_latents = conditional_latents / vae.config.scaling_factor
 
-                                # Sample random timesteps
-                                sigmas = rand_log_normal(
-                                    shape=[bsz, ],
-                                    loc=0.7,
-                                    scale=1.6
-                                ).to(latents.device)
-                                sigmas = sigmas[:, None, None, None, None]
+                                    # Sample random timesteps
+                                    sigmas = rand_log_normal(
+                                        shape=[bsz, ],
+                                        loc=0.7,
+                                        scale=1.6
+                                    ).to(latents.device)
+                                    sigmas = sigmas[:, None, None, None, None]
 
-                                # Add noise to latents
-                                noisy_latents = latents + noise * sigmas
-                                timesteps = torch.Tensor([0.25 * sigma.log() for sigma in sigmas]).to(
-                                    accelerator.device)
+                                    # Add noise to latents
+                                    noisy_latents = latents + noise * sigmas
+                                    timesteps = torch.Tensor([0.25 * sigma.log() for sigma in sigmas]).to(
+                                        accelerator.device)
 
-                                # Prepare model input
-                                inp_noisy_latents = noisy_latents / ((sigmas ** 2 + 1) ** 0.5)
+                                    # Prepare model input
+                                    inp_noisy_latents = noisy_latents / ((sigmas ** 2 + 1) ** 0.5)
 
-                                # Get image embeddings
-                                encoder_hidden_states = encode_image(pixel_values[:, 0, :, :, :].float())
+                                    # Get image embeddings
+                                    encoder_hidden_states = encode_image(pixel_values[:, 0, :, :, :].float())
 
-                                # Prepare time embeddings
-                                added_time_ids = _get_add_time_ids(
-                                    7,
-                                    127,
-                                    noise_aug_strength,
-                                    encoder_hidden_states.dtype,
-                                    bsz,
-                                ).to(latents.device)
+                                    # Prepare time embeddings
+                                    added_time_ids = _get_add_time_ids(
+                                        7,
+                                        127,
+                                        noise_aug_strength,
+                                        encoder_hidden_states.dtype,
+                                        bsz,
+                                    ).to(latents.device)
 
-                                # Optional conditioning dropout
-                                if args.conditioning_dropout_prob is not None:
-                                    random_p = torch.rand(bsz, device=latents.device, generator=generator)
-                                    prompt_mask = random_p < 2 * args.conditioning_dropout_prob
-                                    prompt_mask = prompt_mask.reshape(bsz, 1, 1)
+                                    # Optional conditioning dropout
+                                    if args.conditioning_dropout_prob is not None:
+                                        random_p = torch.rand(bsz, device=latents.device, generator=generator)
+                                        prompt_mask = random_p < 2 * args.conditioning_dropout_prob
+                                        prompt_mask = prompt_mask.reshape(bsz, 1, 1)
 
-                                    null_conditioning = torch.zeros_like(encoder_hidden_states)
-                                    encoder_hidden_states = torch.where(
-                                        prompt_mask,
-                                        null_conditioning.unsqueeze(1),
-                                        encoder_hidden_states.unsqueeze(1),
-                                    )
+                                        null_conditioning = torch.zeros_like(encoder_hidden_states)
+                                        encoder_hidden_states = torch.where(
+                                            prompt_mask,
+                                            null_conditioning.unsqueeze(1),
+                                            encoder_hidden_states.unsqueeze(1),
+                                        )
 
-                                    image_mask_dtype = conditional_latents.dtype
-                                    image_mask = 1 - (
-                                                (random_p >= args.conditioning_dropout_prob).to(image_mask_dtype) *
-                                                (random_p < 3 * args.conditioning_dropout_prob).to(image_mask_dtype))
-                                    image_mask = image_mask.reshape(bsz, 1, 1, 1)
-                                    conditional_latents = image_mask * conditional_latents
+                                        image_mask_dtype = conditional_latents.dtype
+                                        image_mask = 1 - (
+                                                    (random_p >= args.conditioning_dropout_prob).to(image_mask_dtype) *
+                                                    (random_p < 3 * args.conditioning_dropout_prob).to(image_mask_dtype))
+                                        image_mask = image_mask.reshape(bsz, 1, 1, 1)
+                                        conditional_latents = image_mask * conditional_latents
 
-                                # Concatenate conditional latents
-                                conditional_latents = conditional_latents.unsqueeze(1).repeat(1, noisy_latents.shape[1],
-                                                                                              1, 1, 1)
-                                inp_noisy_latents = torch.cat([inp_noisy_latents, conditional_latents], dim=2)
+                                    # Concatenate conditional latents
+                                    conditional_latents = conditional_latents.unsqueeze(1).repeat(1, noisy_latents.shape[1],
+                                                                                                  1, 1, 1)
+                                    inp_noisy_latents = torch.cat([inp_noisy_latents, conditional_latents], dim=2)
 
-                                # Model prediction
-                                target = latents
-                                model_pred = unet(
-                                    inp_noisy_latents,
-                                    timesteps,
-                                    encoder_hidden_states,
-                                    added_time_ids=added_time_ids,
-                                ).sample
+                                    # Model prediction
+                                    target = latents
+                                    model_pred = unet(
+                                        inp_noisy_latents,
+                                        timesteps,
+                                        encoder_hidden_states,
+                                        added_time_ids=added_time_ids,
+                                    ).sample
 
-                                # Denoise latents
-                                c_out = -sigmas / ((sigmas ** 2 + 1) ** 0.5)
-                                c_skip = 1 / (sigmas ** 2 + 1)
-                                denoised_latents = model_pred * c_out + c_skip * noisy_latents
-                                weighing = (1 + sigmas ** 2) * (sigmas ** -2.0)
+                                    # Denoise latents
+                                    c_out = -sigmas / ((sigmas ** 2 + 1) ** 0.5)
+                                    c_skip = 1 / (sigmas ** 2 + 1)
+                                    denoised_latents = model_pred * c_out + c_skip * noisy_latents
+                                    weighing = (1 + sigmas ** 2) * (sigmas ** -2.0)
 
-                                # Calculate loss
-                                loss = torch.mean(
-                                    (weighing.float() * (denoised_latents.float() - target.float()) ** 2).reshape(
-                                        target.shape[0], -1),
-                                    dim=1
-                                ).mean()
+                                    # Calculate loss
+                                    loss = torch.mean(
+                                        (weighing.float() * (denoised_latents.float() - target.float()) ** 2).reshape(
+                                            target.shape[0], -1),
+                                        dim=1
+                                    ).mean()
 
-                                # 收集当前批次的输出
-                                val_outputs_current.append({
-                                    'inputs': conditional_pixel_values.cpu().numpy(),
-                                    'preds': denoised_latents.cpu().numpy(),
-                                    'trues': target.cpu().numpy()
-                                })
+                                    # 收集当前批次的输出
+                                    val_outputs_current.append({
+                                        'inputs': conditional_pixel_values.cpu().numpy(),
+                                        'preds': denoised_latents.cpu().numpy(),
+                                        'trues': target.cpu().numpy()
+                                    })
 
-                                val_loss += loss.item()
+                                    val_loss += loss.item()
+                                    val_pbar.set_postfix({'val_loss': val_loss / (val_step + 1)})
 
                         val_loss /= len(val_dataloader)
                         # 只在得到更好的验证loss时更新best_val_outputs
