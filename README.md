@@ -3,7 +3,7 @@
 
 ## 1. 单卡训练
 ```bash
-accelerate launch train_svd.py \
+CUDA_VISIBLE_DEVICES=1 nohup accelerate launch train_svd.py \
     --base_folder=data \
     --pretrained_model_name_or_path=stable-video-diffusion-img2vid \
     --per_gpu_batch_size=1 \
@@ -15,10 +15,10 @@ accelerate launch train_svd.py \
     --checkpoints_total_limit=1 \
     --learning_rate=1e-5 \
     --lr_warmup_steps=0 \
-    --num_frames 14 \
+    --num_frames 12 \
     --seed=123 \
     --mixed_precision="fp16" \
-    --validation_steps=200 
+    --validation_steps=200 > $(date +%m%d).log 2>&1 &
 ```
 
 ## 2.双卡训练
