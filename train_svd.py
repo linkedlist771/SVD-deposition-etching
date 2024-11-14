@@ -76,22 +76,31 @@ def rand_log_normal(shape, loc=0.0, scale=1.0, device="cpu", dtype=torch.float32
 
 class DummyDataset(Dataset):
     def __init__(
-        self,
-        base_folder: str,
-        num_samples=100000,
-        width=1024,
-        height=576,
-        sample_frames=25,
+            self,
+            base_folder: str,
+            split='train',  # Add split parameter
+            split_ratio=0.8,  # Add split ratio parameter
+            num_samples=100000,
+            width=1024,
+            height=576,
+            sample_frames=25,
     ):
         """
         Args:
-            num_samples (int): Number of samples in the dataset.
-            channels (int): Number of channels, default is 3 for RGB.
+            split (str): 'train' or 'val' to determine which split to use
+            split_ratio (float): ratio of training data (0.8 means 80% train, 20% val)
         """
         self.num_samples = num_samples
-        # Define the path to the folder containing video frames
         self.base_folder = base_folder
-        self.folders = os.listdir(self.base_folder)
+        folders = os.listdir(self.base_folder)
+
+        # Add dataset splitting logic
+        n_train = int(len(folders) * split_ratio)
+        if split == 'train':
+            self.folders = folders[:n_train]
+        else:
+            self.folders = folders[n_train:]
+
         self.channels = 3
         self.width = width
         self.height = height
@@ -861,6 +870,26 @@ def main():
         num_workers=args.num_workers,
     )
 
+    # Add validation dataloader
+    val_dataset = DummyDataset(
+        args.base_folder,
+        split='val',
+        width=args.width,
+        height=args.height,
+        sample_frames=args.num_frames
+    )
+    val_dataloader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=args.per_gpu_batch_size,
+        num_workers=args.num_workers,
+    )
+
+    # Prepare validation dataloader
+    val_dataloader = accelerator.prepare(val_dataloader)
+
+    # Add validation outputs collection
+    val_outputs = []
+
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(
@@ -998,6 +1027,8 @@ def main():
         disable=not accelerator.is_local_main_process,
     )
     progress_bar.set_description("Steps")
+    best_val_loss = float("inf")
+    best_val_outputs = None  # 用于存储最佳验证结果
 
     for epoch in range(first_epoch, args.num_train_epochs):
         unet.train()
@@ -1213,6 +1244,134 @@ def main():
                         logger.info(
                             f"Running validation... \n Generating {args.num_validation_images} videos."
                         )
+
+                        unet.eval()
+                        val_loss = 0
+                        val_outputs_current = []  # 当前步骤的临时存储
+
+                        # Add validation loop
+                        for val_step, val_batch in enumerate(val_dataloader):
+                            with torch.no_grad():
+                                # Copy validation logic from training step
+                                pixel_values = val_batch["pixel_values"].to(weight_dtype).to(accelerator.device,
+                                                                                             non_blocking=True)
+                                conditional_pixel_values = pixel_values[:, 0:1, :, :, :]
+
+                                # Convert images to latent space
+                                latents = tensor_to_vae_latent(pixel_values, vae)
+
+                                # Sample noise
+                                noise = torch.randn_like(latents)
+                                bsz = latents.shape[0]
+
+                                # Calculate condition sigmas
+                                cond_sigmas = rand_log_normal(
+                                    shape=[bsz, ],
+                                    loc=-3.0,
+                                    scale=0.5
+                                ).to(latents)
+                                noise_aug_strength = cond_sigmas[0]
+                                cond_sigmas = cond_sigmas[:, None, None, None, None]
+
+                                # Add noise to conditional frames
+                                conditional_pixel_values = torch.randn_like(
+                                    conditional_pixel_values) * cond_sigmas + conditional_pixel_values
+                                conditional_latents = tensor_to_vae_latent(conditional_pixel_values, vae)[:, 0, :, :, :]
+                                conditional_latents = conditional_latents / vae.config.scaling_factor
+
+                                # Sample random timesteps
+                                sigmas = rand_log_normal(
+                                    shape=[bsz, ],
+                                    loc=0.7,
+                                    scale=1.6
+                                ).to(latents.device)
+                                sigmas = sigmas[:, None, None, None, None]
+
+                                # Add noise to latents
+                                noisy_latents = latents + noise * sigmas
+                                timesteps = torch.Tensor([0.25 * sigma.log() for sigma in sigmas]).to(
+                                    accelerator.device)
+
+                                # Prepare model input
+                                inp_noisy_latents = noisy_latents / ((sigmas ** 2 + 1) ** 0.5)
+
+                                # Get image embeddings
+                                encoder_hidden_states = encode_image(pixel_values[:, 0, :, :, :].float())
+
+                                # Prepare time embeddings
+                                added_time_ids = _get_add_time_ids(
+                                    7,
+                                    127,
+                                    noise_aug_strength,
+                                    encoder_hidden_states.dtype,
+                                    bsz,
+                                ).to(latents.device)
+
+                                # Optional conditioning dropout
+                                if args.conditioning_dropout_prob is not None:
+                                    random_p = torch.rand(bsz, device=latents.device, generator=generator)
+                                    prompt_mask = random_p < 2 * args.conditioning_dropout_prob
+                                    prompt_mask = prompt_mask.reshape(bsz, 1, 1)
+
+                                    null_conditioning = torch.zeros_like(encoder_hidden_states)
+                                    encoder_hidden_states = torch.where(
+                                        prompt_mask,
+                                        null_conditioning.unsqueeze(1),
+                                        encoder_hidden_states.unsqueeze(1),
+                                    )
+
+                                    image_mask_dtype = conditional_latents.dtype
+                                    image_mask = 1 - (
+                                                (random_p >= args.conditioning_dropout_prob).to(image_mask_dtype) *
+                                                (random_p < 3 * args.conditioning_dropout_prob).to(image_mask_dtype))
+                                    image_mask = image_mask.reshape(bsz, 1, 1, 1)
+                                    conditional_latents = image_mask * conditional_latents
+
+                                # Concatenate conditional latents
+                                conditional_latents = conditional_latents.unsqueeze(1).repeat(1, noisy_latents.shape[1],
+                                                                                              1, 1, 1)
+                                inp_noisy_latents = torch.cat([inp_noisy_latents, conditional_latents], dim=2)
+
+                                # Model prediction
+                                target = latents
+                                model_pred = unet(
+                                    inp_noisy_latents,
+                                    timesteps,
+                                    encoder_hidden_states,
+                                    added_time_ids=added_time_ids,
+                                ).sample
+
+                                # Denoise latents
+                                c_out = -sigmas / ((sigmas ** 2 + 1) ** 0.5)
+                                c_skip = 1 / (sigmas ** 2 + 1)
+                                denoised_latents = model_pred * c_out + c_skip * noisy_latents
+                                weighing = (1 + sigmas ** 2) * (sigmas ** -2.0)
+
+                                # Calculate loss
+                                loss = torch.mean(
+                                    (weighing.float() * (denoised_latents.float() - target.float()) ** 2).reshape(
+                                        target.shape[0], -1),
+                                    dim=1
+                                ).mean()
+
+                                # 收集当前批次的输出
+                                val_outputs_current.append({
+                                    'inputs': conditional_pixel_values.cpu().numpy(),
+                                    'preds': denoised_latents.cpu().numpy(),
+                                    'trues': target.cpu().numpy()
+                                })
+
+                                val_loss += loss.item()
+
+                        val_loss /= len(val_dataloader)
+                        # 只在得到更好的验证loss时更新best_val_outputs
+                        if val_loss < best_val_loss:
+                            best_val_loss = val_loss
+                            best_val_outputs = val_outputs_current  # 保存当前最佳结果
+                        # Log validation loss
+                        accelerator.log({"val_loss": val_loss}, step=global_step)
+                        # Eval loss step this time
+
                         # create pipeline
                         if args.use_ema:
                             # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
@@ -1307,6 +1466,27 @@ def main():
                 commit_message="End of training",
                 ignore_patterns=["step_*", "epoch_*"],
             )
+    # 在训练结束时，使用best_val_outputs而不是val_outputs
+    if accelerator.is_main_process:
+        if best_val_outputs is not None:
+            # 合并最佳验证输出
+            results_all = {}
+            for k in best_val_outputs[0].keys():
+                results_all[k] = np.concatenate([batch[k] for batch in best_val_outputs], axis=0)
+
+            # 计算指标
+            mae = np.mean(np.abs(results_all['preds'] - results_all['trues']))
+            mse = np.mean((results_all['preds'] - results_all['trues']) ** 2)
+            results_all['metrics'] = np.array([mae, mse])
+
+            # 保存结果
+            save_dir = os.path.join(args.output_dir, 'saved')
+            os.makedirs(save_dir, exist_ok=True)
+
+            for np_data in ['metrics', 'inputs', 'trues', 'preds']:
+                np.save(os.path.join(save_dir, f'{np_data}.npy'), results_all[np_data])
+
+            print(f"Best validation MAE: {mae:.4f}, MSE: {mse:.4f}")
     accelerator.end_training()
 
 
