@@ -18,6 +18,7 @@ CUDA_VISIBLE_DEVICES=1 nohup accelerate launch train_svd.py \
     --num_frames 12 \
     --seed=123 \
     --mixed_precision="fp16" \
+    --split_ratio=0.8 \
     --validation_steps=200 > $(date +%m%d).log 2>&1 &
 ```
 
