@@ -21,6 +21,7 @@ import logging
 import math
 import os
 import re
+from os.path import split
 
 import cv2
 import shutil
@@ -600,6 +601,12 @@ def parse_args():
         default=None,
         help="use weight for unet block",
     )
+    parser.add_argument(
+        "--split_ratio",
+        type=float,
+        default=0.99,
+        help="Ratio of training data to total data",
+    )
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -858,6 +865,7 @@ def main():
 
     train_dataset = DummyDataset(
         args.base_folder,
+        split_ratio=args.split_ratio,
         width=args.width,
         height=args.height,
         sample_frames=args.num_frames,
@@ -873,7 +881,10 @@ def main():
     # Add validation dataloader
     val_dataset = DummyDataset(
         args.base_folder,
+
         split='val',
+        split_ratio=args.split_ratio,
+
         width=args.width,
         height=args.height,
         sample_frames=args.num_frames
