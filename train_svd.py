@@ -99,16 +99,27 @@ class DummyDataset(Dataset):
         n_train = int(len(folders) * split_ratio)
         if split == 'train':
             self.folders = folders[:n_train]
+
         else:
             self.folders = folders[n_train:]
+
 
         self.channels = 3
         self.width = width
         self.height = height
         self.sample_frames = sample_frames
+        # 计算实际可用的样本数量
+        self.available_samples = 0
+        for folder in self.folders:
+            folder_path = os.path.join(self.base_folder, folder)
+            frames = os.listdir(folder_path)
+            if len(frames) >= self.sample_frames:
+                # 对于每个文件夹，计算可能的帧序列数量
+                self.available_samples += len(frames) - self.sample_frames + 1
 
     def __len__(self):
-        return self.num_samples
+        return self.available_samples
+
 
     def natural_sort_key(self, s):
         """按照自然数顺序排序文件名"""
