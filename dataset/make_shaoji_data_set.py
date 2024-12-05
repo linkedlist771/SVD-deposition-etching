@@ -3,6 +3,8 @@ from pathlib import Path
 from tqdm import tqdm
 import cv2
 import time
+import multiprocessing
+from multiprocessing import Pool
 
 from utils.image_utils import remove_watermark
 from configs.path_configs import DATA_DIR
@@ -12,7 +14,7 @@ class ShaoJiDataToSvd(object):
     def __init__(self, source_data_dir: Path, target_data_dir: Path, sample_interval: int = 1):
         self.source_data_dir = source_data_dir
         self.target_data_dir = target_data_dir
-        self.sample_interval = sample_interval  # 每隔多少帧取一帧
+        self.sample_interval = sample_interval
         self.target_data_dir.mkdir(parents=True, exist_ok=True)
 
     def process_single_video(self, video_path: Path):
@@ -23,8 +25,6 @@ class ShaoJiDataToSvd(object):
 
         cap = cv2.VideoCapture(str(video_path))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        # 计算实际需要处理的帧数
         processed_frames = total_frames // self.sample_interval
 
         with tqdm(total=processed_frames, desc=f"Processing {video_path.name}") as pbar:
@@ -35,7 +35,6 @@ class ShaoJiDataToSvd(object):
                 if not ret:
                     break
 
-                # 只处理符合采样间隔的帧
                 if frame_count % self.sample_interval == 0:
                     save_path = save_dir / f"{saved_count + 1}.png"
                     cv2.imwrite(str(save_path), frame)
@@ -45,11 +44,28 @@ class ShaoJiDataToSvd(object):
                 frame_count += 1
 
         cap.release()
+        return f"Completed processing {video_path.name}"
 
-    def process_all_videos(self):
+    @staticmethod
+    def _process_video_wrapper(args):
+        """Wrapper function for multiprocessing"""
+        self_instance, video_path = args
+        return self_instance.process_single_video(video_path)
+
+    def process_all_videos(self, num_processes=None):
+        if num_processes is None:
+            num_processes = multiprocessing.cpu_count()
+
         video_files = list(self.source_data_dir.glob("*.mp4"))
-        for video_path in tqdm(video_files, desc="Processing videos"):
-            self.process_single_video(video_path)
+        with Pool(processes=num_processes) as pool:
+            args = [(self, video_path) for video_path in video_files]
+            results = list(tqdm(
+                pool.imap(self._process_video_wrapper, args),
+                total=len(video_files),
+                desc="Processing videos"
+            ))
+        return results
+
 
 
 if __name__ == "__main__":
@@ -57,10 +73,13 @@ if __name__ == "__main__":
     target_path = DATA_DIR / "shaoji-data"
     target_path.mkdir(exist_ok=True)
 
-    # 设置采样间隔，例如设置为30表示每秒采样一帧（假设视频为30fps）
-    sample_interval = 1
-
+    sample_interval = 10
     processor = ShaoJiDataToSvd(source_path, target_path, sample_interval)
-    # Process single video for testing
-    test_video = next(source_path.glob("*.mp4"))  # Get first video file
-    processor.process_single_video(test_video)
+
+    # Using multiprocessing to process all videos
+    num_processes = multiprocessing.cpu_count()  # Use all available CPU cores
+    results = processor.process_all_videos(num_processes=num_processes)
+
+    # Alternatively, for testing a single video:
+    # test_video = next(source_path.glob("*.mp4"))
+    # processor.process_single_video(test_video)

@@ -598,7 +598,7 @@ def parse_args():
     parser.add_argument(
         "--generation_fps",
         type=int,
-        default=60,
+        default=6,
         help="The fps of the generated image"
     )
     parser.add_argument(
