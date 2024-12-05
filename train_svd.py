@@ -1221,6 +1221,7 @@ def main():
                 progress_bar.update(1)
                 global_step += 1
                 accelerator.log({"train_loss": train_loss}, step=global_step)
+                print(f"Step: {global_step}, Train Loss: {train_loss}")
                 train_loss = 0.0
 
                 if accelerator.is_main_process:
@@ -1396,6 +1397,8 @@ def main():
                             best_val_outputs = val_outputs_current  # 保存当前最佳结果
                         # Log validation loss
                         accelerator.log({"val_loss": val_loss}, step=global_step)
+                        print(f"Step: {global_step}, Val Loss: {val_loss}")
+
                         # Eval loss step this time
 
                         # create pipeline
