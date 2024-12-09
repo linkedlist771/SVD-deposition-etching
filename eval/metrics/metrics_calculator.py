@@ -4,6 +4,7 @@ from pathlib import Path
 from loguru import logger
 from eval.metrics.base_metrics import BaseMetrics
 from eval.metrics.fid import FIDMetric
+from eval.metrics.psnr import PSNRMetric
 
 
 class MetricsCalculator(BaseModel):
@@ -27,10 +28,10 @@ class MetricsCalculator(BaseModel):
                 dims=self.dims
             ),
             # Add more metrics here as needed
-            # "psnr": PSNRMetric(
-            #     real_dataset_dir_path=self.real_dataset_dir_path,
-            #     generated_dataset_dir_path=self.generated_dataset_dir_path
-            # ),
+            "psnr": PSNRMetric(
+                real_dataset_dir_path=self.real_dataset_dir_path,
+                generated_dataset_dir_path=self.generated_dataset_dir_path
+            ),
         }
 
         return metrics_mapping.get(metric_name.lower())
@@ -51,6 +52,7 @@ class MetricsCalculator(BaseModel):
             try:
                 result = metric_instance.calculate()
                 results[metric_name] = result
+                logger.info(f"Metric '{metric_name}' calculated successfully: {result}")
             except Exception as e:
                 logger.error(f"Error calculating metric '{metric_name}': {str(e)}")
                 results[metric_name] = None
@@ -63,7 +65,7 @@ if __name__ == "__main__":
     calculator = MetricsCalculator(
         real_dataset_dir_path=Path(ROOT / "data/shaoji-data/12-05-01-03-19"),
         generated_dataset_dir_path=Path(ROOT / "data/shaoji-data/12-05-01-04-42"),
-        metrics=["FID", "PSNR"]  # Add more metrics as needed
+        metrics=["PSNR", "FID", ]  # Add more metrics as needed
     )
     results = calculator.calculate_all()
     print(results)  # {'fid': 123.45, 'psnr': 67.89}
