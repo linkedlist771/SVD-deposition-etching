@@ -7,9 +7,10 @@ from tqdm import tqdm
 from loguru import logger
 import torch
 import lpips
-import os
 from eval.utils.file_utils import get_image_files
-os.environ['TORCH_HOME'] = MODELS_DIR.as_posix()
+import os
+
+os.environ["TORCH_HOME"] = MODELS_DIR.as_posix()
 torch.hub.set_dir(MODELS_DIR.as_posix())
 
 
@@ -29,8 +30,9 @@ class LPIPSMetric(BaseMetrics):
         """计算两张图片的LPIPS值"""
         # 初始化LPIPS模型
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        loss_fn = lpips.LPIPS(pretrained=True, net="alex", verbose=False
-                              ).eval().to(device)
+        loss_fn = (
+            lpips.LPIPS(pretrained=True, net="alex", verbose=False).eval().to(device)
+        )
 
         # 预处理图像
         img1 = self._preprocess_image(img1_path)

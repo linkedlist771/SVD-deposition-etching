@@ -5,6 +5,7 @@ from loguru import logger
 
 from eval.metrics._lpips import LPIPSMetric
 from eval.metrics.base_metrics import BaseMetrics
+from eval.metrics.clip_score import ClipScoreMetric
 from eval.metrics.fid import FIDMetric
 from eval.metrics.psnr import PSNRMetric
 
@@ -35,6 +36,10 @@ class MetricsCalculator(BaseModel):
                 generated_dataset_dir_path=self.generated_dataset_dir_path,
             ),
             "lpips": LPIPSMetric(
+                real_dataset_dir_path=self.real_dataset_dir_path,
+                generated_dataset_dir_path=self.generated_dataset_dir_path,
+            ),
+            "clip_score": ClipScoreMetric(
                 real_dataset_dir_path=self.real_dataset_dir_path,
                 generated_dataset_dir_path=self.generated_dataset_dir_path,
             ),
@@ -73,6 +78,7 @@ if __name__ == "__main__":
         real_dataset_dir_path=Path(ROOT / "data/shaoji-data/12-05-01-03-19"),
         generated_dataset_dir_path=Path(ROOT / "data/shaoji-data/12-05-01-04-42"),
         metrics=[
+            "CLIP_SCORE",
             "LPIPS",
             "PSNR",
             "FID",
