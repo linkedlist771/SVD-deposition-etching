@@ -77,14 +77,14 @@ def rand_log_normal(shape, loc=0.0, scale=1.0, device="cpu", dtype=torch.float32
 
 class DummyDataset(Dataset):
     def __init__(
-            self,
-            base_folder: str,
-            split='train',  # Add split parameter
-            split_ratio=0.8,  # Add split ratio parameter
-            num_samples=100000,
-            width=1024,
-            height=576,
-            sample_frames=25,
+        self,
+        base_folder: str,
+        split="train",  # Add split parameter
+        split_ratio=0.8,  # Add split ratio parameter
+        num_samples=100000,
+        width=1024,
+        height=576,
+        sample_frames=25,
     ):
         """
         Args:
@@ -97,12 +97,11 @@ class DummyDataset(Dataset):
 
         # Add dataset splitting logic
         n_train = int(len(folders) * split_ratio)
-        if split == 'train':
+        if split == "train":
             self.folders = folders[:n_train]
 
         else:
             self.folders = folders[n_train:]
-
 
         self.channels = 3
         self.width = width
@@ -119,7 +118,6 @@ class DummyDataset(Dataset):
 
     def __len__(self):
         return self.available_samples
-
 
     def natural_sort_key(self, s):
         """按照自然数顺序排序文件名"""
@@ -164,7 +162,9 @@ class DummyDataset(Dataset):
         for i, frame_name in enumerate(selected_frames):
             frame_path = os.path.join(folder_path, frame_name)
             with Image.open(frame_path) as img:
-                img = img.convert('RGB') # TODO: this is hack , other wise the VAE fails
+                img = img.convert(
+                    "RGB"
+                )  # TODO: this is hack , other wise the VAE fails
 
                 # Resize the image and convert it to a tensor
                 img_resized = img.resize((self.width, self.height))
@@ -892,13 +892,11 @@ def main():
     # Add validation dataloader
     val_dataset = DummyDataset(
         args.base_folder,
-
-        split='val',
+        split="val",
         split_ratio=args.split_ratio,
-
         width=args.width,
         height=args.height,
-        sample_frames=args.num_frames
+        sample_frames=args.num_frames,
     )
     val_dataloader = torch.utils.data.DataLoader(
         val_dataset,
@@ -1274,14 +1272,21 @@ def main():
 
                         # Add validation loop
                         # Add tqdm progress bar for validation
-                        with tqdm(val_dataloader, desc="Validation", leave=False) as val_pbar:
+                        with tqdm(
+                            val_dataloader, desc="Validation", leave=False
+                        ) as val_pbar:
                             for val_step, val_batch in enumerate(val_pbar):
                                 # for val_step, val_batch in enumerate(val_dataloader):
                                 with torch.no_grad():
                                     # Copy validation logic from training step
-                                    pixel_values = val_batch["pixel_values"].to(weight_dtype).to(accelerator.device,
-                                                                                                 non_blocking=True)
-                                    conditional_pixel_values = pixel_values[:, 0:1, :, :, :]
+                                    pixel_values = (
+                                        val_batch["pixel_values"]
+                                        .to(weight_dtype)
+                                        .to(accelerator.device, non_blocking=True)
+                                    )
+                                    conditional_pixel_values = pixel_values[
+                                        :, 0:1, :, :, :
+                                    ]
 
                                     # Convert images to latent space
                                     latents = tensor_to_vae_latent(pixel_values, vae)
@@ -1292,37 +1297,53 @@ def main():
 
                                     # Calculate condition sigmas
                                     cond_sigmas = rand_log_normal(
-                                        shape=[bsz, ],
+                                        shape=[
+                                            bsz,
+                                        ],
                                         loc=-3.0,
-                                        scale=0.5
+                                        scale=0.5,
                                     ).to(latents)
                                     noise_aug_strength = cond_sigmas[0]
                                     cond_sigmas = cond_sigmas[:, None, None, None, None]
 
                                     # Add noise to conditional frames
-                                    conditional_pixel_values = torch.randn_like(
-                                        conditional_pixel_values) * cond_sigmas + conditional_pixel_values
-                                    conditional_latents = tensor_to_vae_latent(conditional_pixel_values, vae)[:, 0, :, :, :]
-                                    conditional_latents = conditional_latents / vae.config.scaling_factor
+                                    conditional_pixel_values = (
+                                        torch.randn_like(conditional_pixel_values)
+                                        * cond_sigmas
+                                        + conditional_pixel_values
+                                    )
+                                    conditional_latents = tensor_to_vae_latent(
+                                        conditional_pixel_values, vae
+                                    )[:, 0, :, :, :]
+                                    conditional_latents = (
+                                        conditional_latents / vae.config.scaling_factor
+                                    )
 
                                     # Sample random timesteps
                                     sigmas = rand_log_normal(
-                                        shape=[bsz, ],
+                                        shape=[
+                                            bsz,
+                                        ],
                                         loc=0.7,
-                                        scale=1.6
+                                        scale=1.6,
                                     ).to(latents.device)
                                     sigmas = sigmas[:, None, None, None, None]
 
                                     # Add noise to latents
                                     noisy_latents = latents + noise * sigmas
-                                    timesteps = torch.Tensor([0.25 * sigma.log() for sigma in sigmas]).to(
-                                        accelerator.device)
+                                    timesteps = torch.Tensor(
+                                        [0.25 * sigma.log() for sigma in sigmas]
+                                    ).to(accelerator.device)
 
                                     # Prepare model input
-                                    inp_noisy_latents = noisy_latents / ((sigmas ** 2 + 1) ** 0.5)
+                                    inp_noisy_latents = noisy_latents / (
+                                        (sigmas**2 + 1) ** 0.5
+                                    )
 
                                     # Get image embeddings
-                                    encoder_hidden_states = encode_image(pixel_values[:, 0, :, :, :].float())
+                                    encoder_hidden_states = encode_image(
+                                        pixel_values[:, 0, :, :, :].float()
+                                    )
 
                                     # Prepare time embeddings
                                     added_time_ids = _get_add_time_ids(
@@ -1335,11 +1356,20 @@ def main():
 
                                     # Optional conditioning dropout
                                     if args.conditioning_dropout_prob is not None:
-                                        random_p = torch.rand(bsz, device=latents.device, generator=generator)
-                                        prompt_mask = random_p < 2 * args.conditioning_dropout_prob
+                                        random_p = torch.rand(
+                                            bsz,
+                                            device=latents.device,
+                                            generator=generator,
+                                        )
+                                        prompt_mask = (
+                                            random_p
+                                            < 2 * args.conditioning_dropout_prob
+                                        )
                                         prompt_mask = prompt_mask.reshape(bsz, 1, 1)
 
-                                        null_conditioning = torch.zeros_like(encoder_hidden_states)
+                                        null_conditioning = torch.zeros_like(
+                                            encoder_hidden_states
+                                        )
                                         encoder_hidden_states = torch.where(
                                             prompt_mask,
                                             null_conditioning.unsqueeze(1),
@@ -1348,15 +1378,27 @@ def main():
 
                                         image_mask_dtype = conditional_latents.dtype
                                         image_mask = 1 - (
-                                                    (random_p >= args.conditioning_dropout_prob).to(image_mask_dtype) *
-                                                    (random_p < 3 * args.conditioning_dropout_prob).to(image_mask_dtype))
+                                            (
+                                                random_p
+                                                >= args.conditioning_dropout_prob
+                                            ).to(image_mask_dtype)
+                                            * (
+                                                random_p
+                                                < 3 * args.conditioning_dropout_prob
+                                            ).to(image_mask_dtype)
+                                        )
                                         image_mask = image_mask.reshape(bsz, 1, 1, 1)
-                                        conditional_latents = image_mask * conditional_latents
+                                        conditional_latents = (
+                                            image_mask * conditional_latents
+                                        )
 
                                     # Concatenate conditional latents
-                                    conditional_latents = conditional_latents.unsqueeze(1).repeat(1, noisy_latents.shape[1],
-                                                                                                  1, 1, 1)
-                                    inp_noisy_latents = torch.cat([inp_noisy_latents, conditional_latents], dim=2)
+                                    conditional_latents = conditional_latents.unsqueeze(
+                                        1
+                                    ).repeat(1, noisy_latents.shape[1], 1, 1, 1)
+                                    inp_noisy_latents = torch.cat(
+                                        [inp_noisy_latents, conditional_latents], dim=2
+                                    )
 
                                     # Model prediction
                                     target = latents
@@ -1368,27 +1410,39 @@ def main():
                                     ).sample
 
                                     # Denoise latents
-                                    c_out = -sigmas / ((sigmas ** 2 + 1) ** 0.5)
-                                    c_skip = 1 / (sigmas ** 2 + 1)
-                                    denoised_latents = model_pred * c_out + c_skip * noisy_latents
-                                    weighing = (1 + sigmas ** 2) * (sigmas ** -2.0)
+                                    c_out = -sigmas / ((sigmas**2 + 1) ** 0.5)
+                                    c_skip = 1 / (sigmas**2 + 1)
+                                    denoised_latents = (
+                                        model_pred * c_out + c_skip * noisy_latents
+                                    )
+                                    weighing = (1 + sigmas**2) * (sigmas**-2.0)
 
                                     # Calculate loss
                                     loss = torch.mean(
-                                        (weighing.float() * (denoised_latents.float() - target.float()) ** 2).reshape(
-                                            target.shape[0], -1),
-                                        dim=1
+                                        (
+                                            weighing.float()
+                                            * (
+                                                denoised_latents.float()
+                                                - target.float()
+                                            )
+                                            ** 2
+                                        ).reshape(target.shape[0], -1),
+                                        dim=1,
                                     ).mean()
 
                                     # 收集当前批次的输出
-                                    val_outputs_current.append({
-                                        'inputs': conditional_pixel_values.cpu().numpy(),
-                                        'preds': denoised_latents.cpu().numpy(),
-                                        'trues': target.cpu().numpy()
-                                    })
+                                    val_outputs_current.append(
+                                        {
+                                            "inputs": conditional_pixel_values.cpu().numpy(),
+                                            "preds": denoised_latents.cpu().numpy(),
+                                            "trues": target.cpu().numpy(),
+                                        }
+                                    )
 
                                     val_loss += loss.item()
-                                    val_pbar.set_postfix({'val_loss': val_loss / (val_step + 1)})
+                                    val_pbar.set_postfix(
+                                        {"val_loss": val_loss / (val_step + 1)}
+                                    )
 
                         val_loss /= len(val_dataloader)
                         # 只在得到更好的验证loss时更新best_val_outputs
@@ -1501,19 +1555,21 @@ def main():
             # 合并最佳验证输出
             results_all = {}
             for k in best_val_outputs[0].keys():
-                results_all[k] = np.concatenate([batch[k] for batch in best_val_outputs], axis=0)
+                results_all[k] = np.concatenate(
+                    [batch[k] for batch in best_val_outputs], axis=0
+                )
 
             # 计算指标
-            mae = np.mean(np.abs(results_all['preds'] - results_all['trues']))
-            mse = np.mean((results_all['preds'] - results_all['trues']) ** 2)
-            results_all['metrics'] = np.array([mae, mse])
+            mae = np.mean(np.abs(results_all["preds"] - results_all["trues"]))
+            mse = np.mean((results_all["preds"] - results_all["trues"]) ** 2)
+            results_all["metrics"] = np.array([mae, mse])
 
             # 保存结果
-            save_dir = os.path.join(args.output_dir, 'saved')
+            save_dir = os.path.join(args.output_dir, "saved")
             os.makedirs(save_dir, exist_ok=True)
 
-            for np_data in ['metrics', 'inputs', 'trues', 'preds']:
-                np.save(os.path.join(save_dir, f'{np_data}.npy'), results_all[np_data])
+            for np_data in ["metrics", "inputs", "trues", "preds"]:
+                np.save(os.path.join(save_dir, f"{np_data}.npy"), results_all[np_data])
 
             print(f"Best validation MAE: {mae:.4f}, MSE: {mse:.4f}")
     accelerator.end_training()

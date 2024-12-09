@@ -99,7 +99,11 @@ def create_model_parallel(args):
 
     # 加载模型
     unet = UNetSpatioTemporalConditionModel.from_pretrained(
-        args.pretrained_model_name_or_path if args.pretrain_unet is None else args.pretrain_unet,
+        (
+            args.pretrained_model_name_or_path
+            if args.pretrain_unet is None
+            else args.pretrain_unet
+        ),
         subfolder="unet",
         low_cpu_mem_usage=True,
         variant="fp16",
@@ -114,7 +118,6 @@ def create_model_parallel(args):
     )
 
     return unet
-
 
 
 class DummyDataset(Dataset):
@@ -186,7 +189,9 @@ class DummyDataset(Dataset):
         for i, frame_name in enumerate(selected_frames):
             frame_path = os.path.join(folder_path, frame_name)
             with Image.open(frame_path) as img:
-                img = img.convert('RGB') # TODO: this is hack , other wise the VAE fails
+                img = img.convert(
+                    "RGB"
+                )  # TODO: this is hack , other wise the VAE fails
 
                 # Resize the image and convert it to a tensor
                 img_resized = img.resize((self.width, self.height))
@@ -653,7 +658,6 @@ def parse_args():
         help="FSDP backward prefetch policy",
     )
 
-
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -769,7 +773,6 @@ def main():
     #     variant="fp16",
     # )
     unet = create_model_parallel(args)
-
 
     # Freeze vae and image_encoder
     vae.requires_grad_(False)
