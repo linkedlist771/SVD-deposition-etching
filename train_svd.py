@@ -141,8 +141,6 @@ class DummyDataset(Dataset):
         frames.sort(key=self.natural_sort_key)
 
         # Sort the frames by name
-        # frames.sort()  # TODO： sort in the int way
-
         # Ensure the selected folder has at least `sample_frames`` frames
         if len(frames) < self.sample_frames:
             raise ValueError(
@@ -906,6 +904,11 @@ def main():
 
     # Prepare validation dataloader
     val_dataloader = accelerator.prepare(val_dataloader)
+
+    # TODO: 挑选一部分图片用于计算validation生成的里面的几个指标。  但是图片的
+    # 帧要是在最大生成帧之内的， 不然后面生成的不好去比较了， 也就是在[0: max_frames-long_pred] 采样，
+    # 然后还要记录这些帧的位置， 为了后面去计算其他的那些值， 把这些部分都通过部分文件名哈希的方式存储为png
+    # 然后另一个每次计算的时候都要重新生成这些指标， 然后传入两个文件夹路径， 计算这些不同的指标。
 
     # Add validation outputs collection
     val_outputs = []
