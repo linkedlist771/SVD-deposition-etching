@@ -2,6 +2,8 @@ from typing import List, Dict
 from pydantic import BaseModel
 from pathlib import Path
 from loguru import logger
+
+from eval.metrics._lpips import LPIPSMetric
 from eval.metrics.base_metrics import BaseMetrics
 from eval.metrics.fid import FIDMetric
 from eval.metrics.psnr import PSNRMetric
@@ -13,7 +15,7 @@ class MetricsCalculator(BaseModel):
     metrics: List[str]  # List of metric names to calculate
 
     # You might want to add more configuration parameters
-    batch_size: int = 50 # this is for the fid
+    batch_size: int = 50  # this is for the fid
     dims: int = 2048
 
     def _get_metric_instance(self, metric_name: str) -> BaseMetrics:
@@ -25,12 +27,16 @@ class MetricsCalculator(BaseModel):
                 real_dataset_dir_path=self.real_dataset_dir_path,
                 generated_dataset_dir_path=self.generated_dataset_dir_path,
                 batch_size=self.batch_size,
-                dims=self.dims
+                dims=self.dims,
             ),
             # Add more metrics here as needed
             "psnr": PSNRMetric(
                 real_dataset_dir_path=self.real_dataset_dir_path,
-                generated_dataset_dir_path=self.generated_dataset_dir_path
+                generated_dataset_dir_path=self.generated_dataset_dir_path,
+            ),
+            "lpips": LPIPSMetric(
+                real_dataset_dir_path=self.real_dataset_dir_path,
+                generated_dataset_dir_path=self.generated_dataset_dir_path,
             ),
         }
 
@@ -59,13 +65,18 @@ class MetricsCalculator(BaseModel):
 
         return results
 
+
 if __name__ == "__main__":
     from configs.path_configs import ROOT
 
     calculator = MetricsCalculator(
         real_dataset_dir_path=Path(ROOT / "data/shaoji-data/12-05-01-03-19"),
         generated_dataset_dir_path=Path(ROOT / "data/shaoji-data/12-05-01-04-42"),
-        metrics=["PSNR", "FID", ]  # Add more metrics as needed
+        metrics=[
+            "LPIPS",
+            "PSNR",
+            "FID",
+        ],  # Add more metrics as needed
     )
     results = calculator.calculate_all()
     print(results)  # {'fid': 123.45, 'psnr': 67.89}

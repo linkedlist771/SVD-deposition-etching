@@ -33,7 +33,7 @@ limitations under the License.
 """
 
 import pathlib
-from  pathlib import Path
+from pathlib import Path
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from typing import Union, Tuple, Optional
 import numpy as np
