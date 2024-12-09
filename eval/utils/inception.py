@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
+from configs.model_configs import FID_WEIGHTS_PATH
+
 try:
     from torchvision.models.utils import load_state_dict_from_url
 except ImportError:
@@ -212,7 +214,9 @@ def fid_inception_v3():
     inception.Mixed_7b = FIDInceptionE_1(1280)
     inception.Mixed_7c = FIDInceptionE_2(2048)
 
-    state_dict = load_state_dict_from_url(FID_WEIGHTS_URL, progress=True)
+    # state_dict = load_state_dict_from_url(FID_WEIGHTS_URL, progress=True)
+    state_dict = torch.load(FID_WEIGHTS_PATH)
+
     inception.load_state_dict(state_dict)
     return inception
 

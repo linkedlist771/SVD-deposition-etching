@@ -33,8 +33,9 @@ limitations under the License.
 """
 
 import pathlib
+from  pathlib import Path
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
-
+from typing import Union, Tuple, Optional
 import numpy as np
 import torchvision.transforms as TF
 from PIL import Image
@@ -374,12 +375,20 @@ class FIDConfig(BaseModel):
     save_stats: bool = Field(
         default=False, description="Generate an npz archive from a directory of samples"
     )
-    paths: Tuple[str, str] = Field(
+    paths: Tuple[Union[str, Path], Union[str, Path]] = Field(
         description="Paths to the generated images or to .npz statistic files"
     )
 
 
 def calculate_fid(config: FIDConfig):
+    paths = []
+    for path in config.paths:
+        if isinstance(path, Path):
+            paths.append(str(path))
+        else:
+            paths.append(path)
+    config.paths = tuple(paths)
+
     if config.device is None:
         device = torch.device("cuda" if (torch.cuda.is_available()) else "cpu")
     else:

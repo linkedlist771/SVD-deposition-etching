@@ -15,4 +15,4 @@ class FIDMetric(BaseMetrics):
             dims=self.dims,
         )
         fid_value = calculate_fid(config)
-        return fid_value
+        return float(fid_value)
