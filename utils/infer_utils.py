@@ -83,12 +83,13 @@ def generate_images_for_validation_folders(
         ):
             # Inner progress bar for images within each folder
             for i in tqdm(
-                range(0, len(original_images), num_frames),
+                range(0, len(original_images), num_frames), #
                 desc="Processing images",
                 leave=False,
             ):
                 original_image_paths = original_images[i]
-                idx = int(os.path.splitext(original_image_paths)[0])
+                idx = int(os.path.splitext(original_image_paths)[0]) # 原始的图片的里面的idx是
+                # 1.png 2.png ... 这样的
                 suffix = os.path.splitext(original_image_paths)[1]
 
                 logger.debug(f"Processing image {original_image_paths}")
@@ -113,8 +114,8 @@ def generate_images_for_validation_folders(
                     # Save the generated frames
                     for frame_idx, video_frame in enumerate(video_frames):
                         output_image_path = os.path.join(
-                            _output_dir, f"{idx + frame_idx}{suffix}"
-                        )
+                            _output_dir, f"{idx + frame_idx + 1}{suffix}"  # generating the next frames.....
+                        ) # 所以保存的时候是后面的12帧。
                         cv2.imwrite(
                             output_image_path,
                             cv2.cvtColor(video_frame, cv2.COLOR_RGB2BGR),
