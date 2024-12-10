@@ -4,7 +4,7 @@
 ## 1. 单卡训练
 ```bash
 # 10 分钟 * 25 = 250 分钟 差不多几小时的overburder 可以接受。
-CUDA_VISIBLE_DEVICES=1 nohup accelerate launch train_svd.py \
+CUDA_VISIBLE_DEVICES=3 nohup accelerate launch train_svd.py \
     --base_folder=data \
     --pretrained_model_name_or_path=stable-video-diffusion-img2vid \
     --per_gpu_batch_size=1 \
@@ -18,7 +18,7 @@ CUDA_VISIBLE_DEVICES=1 nohup accelerate launch train_svd.py \
     --lr_warmup_steps=0 \
     --num_frames 12 \
     --seed=123 \
-    --mixed_precision="fp16" \
+    --mixed_precision="no" \
     --split_ratio=0.9 \
     --validation_steps=2000 > $(date +%m%d).log 2>&1 &
 ```
