@@ -1,11 +1,14 @@
 from typing import List
 import re
 from PIL import Image, ImageDraw
-from altair.examples.scatter_linked_table import origin
+import cv2
 from diffusers.utils import check_min_version, deprecate, is_wandb_available, load_image
 import os
 import numpy as np
 import torch
+
+from loguru import logger
+from tqdm import tqdm
 
 
 def natural_sort_key(s):
@@ -14,6 +17,7 @@ def natural_sort_key(s):
         int(text) if text.isdigit() else text.lower()
         for text in re.split("([0-9]+)", s)
     ]
+
 
 def export_to_gif(frames, output_gif_path, fps):
     """
@@ -41,75 +45,92 @@ def export_to_gif(frames, output_gif_path, fps):
     )
 
 
-
-
-
 def generate_images_for_validation_folders(
-        pipeline,
-        validation_images_folders: List[str],
-        output_dir: str,
-        num_frames: int,
-        fps=7,
-        height=576,
-        width=1024,
-        decode_chunk_size=8,
-        motion_bucket_id=127,
-        noise_aug_strength=0.02,
-        device="cuda",
-        mixed_precision="fp16"
+    pipeline,
+    validation_images_folders: List[str],
+    output_dir: str,
+    num_frames: int,
+    fps=7,
+    height=576,
+    width=1024,
+    decode_chunk_size=8,
+    motion_bucket_id=127,
+    noise_aug_strength=0.02,
+    device="cuda",
+    mixed_precision="fp16",
 ):
+    logger.info(f"Creating output directory: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
-    # 首先判断这个文件夹是否存咋， 如果不存在则创建。
-    # 然后创建和validation_images_folders 一样的子文件夹架构
-    # 获取验证文件夹的共同基础路径
-    assert len(validation_images_folders) > 0
+
+    assert len(validation_images_folders) > 0, "No validation folders provided"
     common_prefix = os.path.commonpath(validation_images_folders)
+    logger.info(f"Common prefix path: {common_prefix}")
 
-    # 创建对应的子文件夹结构
-    for folder_path in validation_images_folders:
-        # 获取相对于共同基础路径的相对路径
+    # Outer progress bar for folders
+    for folder_path in tqdm(validation_images_folders, desc="Processing folders"):
         relative_path = os.path.relpath(folder_path, common_prefix)
-
-        # 构建输出子目录路径
         output_subdir = os.path.join(output_dir, relative_path)
-
-        # 创建子目录
         os.makedirs(output_subdir, exist_ok=True)
+        logger.info(f"Processing folder: {folder_path}")
+        logger.info(f"Output subdirectory: {output_subdir}")
 
         original_images = os.listdir(folder_path)
         original_images.sort(key=natural_sort_key)
-        # set sep as the number of frames
+        logger.info(f"Found {len(original_images)} images in folder")
 
         with torch.autocast(
-                str(accelerator.device).replace(":0", ""),
-                enabled=accelerator.mixed_precision == "fp16",
+            device,
+            enabled=mixed_precision == "fp16",
         ):
-            for i in range(0, len(original_images), num_frames):
-                original_image_paths =  original_images[i]
+            # Inner progress bar for images within each folder
+            for i in tqdm(
+                range(0, len(original_images), num_frames),
+                desc="Processing images",
+                leave=False,
+            ):
+                original_image_paths = original_images[i]
                 idx = int(os.path.splitext(original_image_paths)[0])
                 suffix = os.path.splitext(original_image_paths)[1]
-                input_image = load_image(original_image_paths).resize((width, height))
-                # Generate video frames
-                video_frames = pipeline(
-                    input_image,
-                    height=height,
-                    width=width,
-                    num_frames=num_frames,
-                    decode_chunk_size=decode_chunk_size,
-                    motion_bucket_id=motion_bucket_id,
-                    fps=fps,
-                    noise_aug_strength=noise_aug_strength,
-                ).frames[0]
 
+                logger.debug(f"Processing image {original_image_paths}")
+                image_full_path = os.path.join(folder_path, original_image_paths)
+                input_image = load_image(image_full_path).resize((width, height))
+                try:
+                    # Generate video frames
+                    video_frames = pipeline(
+                        input_image,
+                        height=height,
+                        width=width,
+                        num_frames=num_frames,
+                        decode_chunk_size=decode_chunk_size,
+                        motion_bucket_id=motion_bucket_id,
+                        fps=fps,
+                        noise_aug_strength=noise_aug_strength,
+                    ).frames[0]
 
-                # Convert frames to numpy arrays
-                video_frames = [np.array(frame) for frame in video_frames]
-                # save the following frames to the output_subdir with the name of the
-                for video_frame in video_frames:
-                    output_image_path = os.path.join(output_subdir, f"{idx}{suffix}")
+                    # Convert frames to numpy arrays
+                    video_frames = [np.array(frame) for frame in video_frames]
 
-                    idx += 1
+                    # Save the generated frames
+                    for frame_idx, video_frame in enumerate(video_frames):
+                        output_image_path = os.path.join(
+                            output_subdir, f"{idx + frame_idx}{suffix}"
+                        )
+                        cv2.imwrite(
+                            output_image_path,
+                            cv2.cvtColor(video_frame, cv2.COLOR_RGB2BGR),
+                        )
 
+                    logger.debug(
+                        f"Successfully generated and saved {len(video_frames)} frames for image {original_image_paths}"
+                    )
 
+                except Exception as e:
+                    logger.error(
+                        f"Error processing image {original_image_paths}: {str(e)}"
+                    )
+                    continue
 
+        logger.info(f"Completed processing folder: {folder_path}")
 
+    logger.success("Completed processing all validation folders")
