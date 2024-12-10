@@ -62,3 +62,19 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 --master_port=29500 train_m
     --seed=123 \
     --mixed_precision="fp16" \
     --validation_steps=200
+
+
+## 3. infer
+
+```bash
+# 10 分钟 * 25 = 250 分钟 差不多几小时的overburder 可以接受。
+CUDA_VISIBLE_DEVICES=1 python infer.py \
+    --base_folder=data \
+    --pretrained_model_name_or_path=stable-video-diffusion-img2vid \
+    --width=512 \
+    --height=384 \
+    --num_frames 12 \
+    --seed=123 \
+    --split_ratio=0.9 \
+    --output_dir="./outputs/val" \
+```

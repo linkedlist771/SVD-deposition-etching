@@ -63,16 +63,15 @@ def generate_images_for_validation_folders(
     os.makedirs(output_dir, exist_ok=True)
 
     assert len(validation_images_folders) > 0, "No validation folders provided"
-    common_prefix = os.path.commonpath(validation_images_folders)
-    logger.info(f"Common prefix path: {common_prefix}")
-
+    val_parent_dir = os.path.dirname(validation_images_folders[0])
     # Outer progress bar for folders
+
     for folder_path in tqdm(validation_images_folders, desc="Processing folders"):
-        relative_path = os.path.relpath(folder_path, common_prefix)
-        output_subdir = os.path.join(output_dir, relative_path)
-        os.makedirs(output_subdir, exist_ok=True)
+        base_dir = os.path.basename(folder_path)
+        _output_dir = os.path.join(output_dir, base_dir)
+        os.makedirs(_output_dir, exist_ok=True)
         logger.info(f"Processing folder: {folder_path}")
-        logger.info(f"Output subdirectory: {output_subdir}")
+        logger.info(f"Output subdirectory: {_output_dir}")
 
         original_images = os.listdir(folder_path)
         original_images.sort(key=natural_sort_key)
@@ -114,7 +113,7 @@ def generate_images_for_validation_folders(
                     # Save the generated frames
                     for frame_idx, video_frame in enumerate(video_frames):
                         output_image_path = os.path.join(
-                            output_subdir, f"{idx + frame_idx}{suffix}"
+                            _output_dir, f"{idx + frame_idx}{suffix}"
                         )
                         cv2.imwrite(
                             output_image_path,

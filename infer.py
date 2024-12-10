@@ -51,6 +51,12 @@ def parse_args():
         default=None,
         help="A random seed for reproducible generation."
     )
+    parser.add_argument(
+        "--split_ratio",
+        type=float,
+        default=0.99,
+        help="Ratio of training data to total data",
+    )
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -83,9 +89,9 @@ if __name__ == "__main__":
     pipe.to("cuda:0")
 
     # Set up dataset splitting
-    split_ratio = 0.8
+    split_ratio = args.split_ratio
     folders = os.listdir(args.base_folder)
-    folders = [f for f in folders if os.path.isdir(os.path.join(args.base_folder, f))]
+    folders = [os.path.join(args.base_folder, f) for f in folders if os.path.isdir(os.path.join(args.base_folder, f))]
     n_train = int(len(folders) * split_ratio)
     validation_images_folders = folders[n_train:]
 
