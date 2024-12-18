@@ -80,10 +80,10 @@ CUDA_VISIBLE_DEVICES=2 nohup python infer.py \
     --output_dir="./outputs/val_fine_tune_50000"  > "infer_log_fine_tune_50000"$(date +%m%d).log 2>&1 &
 ```
 
-
-python train_svd_without_accelerator.py --base_folder=data --pre
-trained_model_name_or_path=stable-video-diffusion-img2vid --per_gpu_batch_size=1 --gradient_ac
-cumulation_steps=4 --max_train_steps=50000 --width=512 --height=384 --checkpointing_steps=1000
- --checkpoints_total_limit=1 --learning_rate=1e-5 --lr_warmup_steps=0 --num_frames 12 --seed=1
-23 --mixed_precision="no" --split_ratio=0.9 --validation_steps=2000
+## 4. eval
+```bash
+CUDA_VISIBLE_DEVICES=0 python eval_metrics.py \
+    --real-dir="data/val" \
+    --gen-dir="outputs/val_fine_tune_50000"
+```
 

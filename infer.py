@@ -4,6 +4,7 @@ import torch
 from diffusers import UNetSpatioTemporalConditionModel, StableVideoDiffusionPipeline
 from utils.infer_utils import generate_images_for_validation_folders
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Script to run inference with Stable Video Diffusion."
@@ -12,51 +13,45 @@ def parse_args():
         "--base_folder",
         required=True,
         type=str,
-        help="Base directory containing folders of input images."
+        help="Base directory containing folders of input images.",
     )
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
         default=None,
         required=True,
-        help="Path to a pretrained model or a model identifier from huggingface.co/models."
+        help="Path to a pretrained model or a model identifier from huggingface.co/models.",
     )
     parser.add_argument(
         "--unet_path",
         type=str,
         default=None,
         required=True,
-        help="Path to a pretrained model or a model identifier from huggingface.co/models."
+        help="Path to a pretrained model or a model identifier from huggingface.co/models.",
     )
     parser.add_argument(
         "--num_frames",
         type=int,
         default=25,
-        help="Number of frames to generate per sample."
+        help="Number of frames to generate per sample.",
     )
     parser.add_argument(
-        "--width",
-        type=int,
-        default=1024,
-        help="Width of the generated frames."
+        "--width", type=int, default=1024, help="Width of the generated frames."
     )
     parser.add_argument(
-        "--height",
-        type=int,
-        default=576,
-        help="Height of the generated frames."
+        "--height", type=int, default=576, help="Height of the generated frames."
     )
     parser.add_argument(
         "--output_dir",
         type=str,
         default="./outputs",
-        help="The directory where the outputs will be saved."
+        help="The directory where the outputs will be saved.",
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=None,
-        help="A random seed for reproducible generation."
+        help="A random seed for reproducible generation.",
     )
     parser.add_argument(
         "--split_ratio",
@@ -65,6 +60,7 @@ def parse_args():
         help="Ratio of training data to total data",
     )
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_args()
@@ -98,7 +94,11 @@ if __name__ == "__main__":
     # Set up dataset splitting
     split_ratio = args.split_ratio
     folders = os.listdir(args.base_folder)
-    folders = [os.path.join(args.base_folder, f) for f in folders if os.path.isdir(os.path.join(args.base_folder, f))]
+    folders = [
+        os.path.join(args.base_folder, f)
+        for f in folders
+        if os.path.isdir(os.path.join(args.base_folder, f))
+    ]
     n_train = int(len(folders) * split_ratio)
     validation_images_folders = folders[n_train:]
 
