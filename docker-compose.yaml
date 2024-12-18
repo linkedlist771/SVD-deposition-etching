@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   my-pytorch-app-svd:
-    image: pytorch_deposition:v1
+    image: pytorch_deposition_svd:v1
     container_name: pytorch_container_svd
     shm_size: '15gb'
     volumes:

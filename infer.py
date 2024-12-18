@@ -22,6 +22,13 @@ def parse_args():
         help="Path to a pretrained model or a model identifier from huggingface.co/models."
     )
     parser.add_argument(
+        "--unet_path",
+        type=str,
+        default=None,
+        required=True,
+        help="Path to a pretrained model or a model identifier from huggingface.co/models."
+    )
+    parser.add_argument(
         "--num_frames",
         type=int,
         default=25,
@@ -69,7 +76,7 @@ if __name__ == "__main__":
 
     # Load the UNet model
     unet = UNetSpatioTemporalConditionModel.from_pretrained(
-        args.pretrained_model_name_or_path,
+        args.unet_path,
         subfolder="unet",
         torch_dtype=torch.float16,
         low_cpu_mem_usage=False,
