@@ -644,6 +644,7 @@ def download_image(url):
 
 # ... (previous imports remain the same, remove accelerator-related imports)
 
+
 def main():
     args = parse_args()
 
@@ -734,6 +735,7 @@ def main():
     if args.use_8bit_adam:
         try:
             import bitsandbytes as bnb
+
             optimizer_cls = bnb.optim.AdamW8bit
         except ImportError:
             raise ImportError("Please install bitsandbytes to use 8-bit Adam")
@@ -790,7 +792,7 @@ def main():
 
     # Training loop
     global_step = 0
-    best_val_loss = float('inf')
+    best_val_loss = float("inf")
     best_val_outputs = None
 
     progress_bar = tqdm(range(max_train_steps))

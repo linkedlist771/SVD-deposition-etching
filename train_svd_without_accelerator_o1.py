@@ -51,10 +51,12 @@ from loguru import logger
 
 check_min_version("0.24.0.dev0")
 
+
 def rand_log_normal(shape, loc=0.0, scale=1.0, device="cpu", dtype=torch.float32):
     """Draws samples from an lognormal distribution."""
     u = torch.rand(shape, dtype=dtype, device=device) * (1 - 2e-7) + 1e-7
     return torch.distributions.Normal(loc, scale).icdf(u).exp()
+
 
 class DummyDataset(Dataset):
     def __init__(
@@ -133,6 +135,7 @@ class DummyDataset(Dataset):
                 pixel_values[i] = img_normalized
         return {"pixel_values": pixel_values}
 
+
 def _compute_padding(kernel_size):
     if len(kernel_size) < 2:
         raise AssertionError(kernel_size)
@@ -149,6 +152,7 @@ def _compute_padding(kernel_size):
         out_padding[2 * i + 1] = pad_rear
 
     return out_padding
+
 
 def _filter2d(input, kernel):
     b, c, h, w = input.shape
@@ -168,6 +172,7 @@ def _filter2d(input, kernel):
     out = output.view(b, c, h, w)
     return out
 
+
 def _gaussian(window_size: int, sigma):
     if isinstance(sigma, float):
         sigma = torch.tensor([[sigma]])
@@ -185,6 +190,7 @@ def _gaussian(window_size: int, sigma):
     gauss = torch.exp(-x.pow(2.0) / (2 * sigma.pow(2.0)))
     return gauss / gauss.sum(-1, keepdim=True)
 
+
 def _gaussian_blur2d(input, kernel_size, sigma):
     if isinstance(sigma, tuple):
         sigma = torch.tensor([sigma], dtype=input.dtype)
@@ -198,6 +204,7 @@ def _gaussian_blur2d(input, kernel_size, sigma):
     out_x = _filter2d(input, kernel_x[..., None, :])
     out = _filter2d(out_x, kernel_y[..., None])
     return out
+
 
 def _resize_with_antialiasing(input, size, interpolation="bicubic", align_corners=True):
     h, w = input.shape[-2:]
@@ -221,6 +228,7 @@ def _resize_with_antialiasing(input, size, interpolation="bicubic", align_corner
     )
     return output
 
+
 def export_to_video(video_frames, output_video_path, fps):
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     h, w, _ = video_frames[0].shape
@@ -228,6 +236,7 @@ def export_to_video(video_frames, output_video_path, fps):
     for i in range(len(video_frames)):
         img = cv2.cvtColor(video_frames[i], cv2.COLOR_RGB2BGR)
         video_writer.write(img)
+
 
 def export_to_gif(frames, output_gif_path, fps):
     pil_frames = [
@@ -244,6 +253,7 @@ def export_to_gif(frames, output_gif_path, fps):
         loop=0,
     )
 
+
 def tensor_to_vae_latent(t, vae):
     video_length = t.shape[1]
     t = rearrange(t, "b f c h w -> (b f) c h w")
@@ -252,56 +262,214 @@ def tensor_to_vae_latent(t, vae):
     latents = latents * vae.config.scaling_factor
     return latents
 
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="Script to train Stable Video Diffusion.")
-    parser.add_argument("--base_folder",required=True,type=str,)
-    parser.add_argument("--pretrained_model_name_or_path",type=str,default=None,required=True)
-    parser.add_argument("--revision",type=str,default=None,required=False)
-    parser.add_argument("--num_frames",type=int,default=25,)
-    parser.add_argument("--width",type=int,default=1024,)
-    parser.add_argument("--height",type=int,default=576,)
-    parser.add_argument("--num_validation_images",type=int,default=1,)
-    parser.add_argument("--validation_steps",type=int,default=500,)
-    parser.add_argument("--output_dir",type=str,default="./outputs",)
+    parser = argparse.ArgumentParser(
+        description="Script to train Stable Video Diffusion."
+    )
+    parser.add_argument(
+        "--base_folder",
+        required=True,
+        type=str,
+    )
+    parser.add_argument(
+        "--pretrained_model_name_or_path", type=str, default=None, required=True
+    )
+    parser.add_argument("--revision", type=str, default=None, required=False)
+    parser.add_argument(
+        "--num_frames",
+        type=int,
+        default=25,
+    )
+    parser.add_argument(
+        "--width",
+        type=int,
+        default=1024,
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=576,
+    )
+    parser.add_argument(
+        "--num_validation_images",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
+        "--validation_steps",
+        type=int,
+        default=500,
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="./outputs",
+    )
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--per_gpu_batch_size",type=int,default=1,)
+    parser.add_argument(
+        "--per_gpu_batch_size",
+        type=int,
+        default=1,
+    )
     parser.add_argument("--num_train_epochs", type=int, default=100)
-    parser.add_argument("--max_train_steps",type=int,default=None,)
-    parser.add_argument("--gradient_accumulation_steps",type=int,default=1,)
-    parser.add_argument("--gradient_checkpointing",action="store_true",)
-    parser.add_argument("--learning_rate",type=float,default=1e-4,)
-    parser.add_argument("--scale_lr",action="store_true",default=False,)
-    parser.add_argument("--lr_scheduler",type=str,default="constant",)
-    parser.add_argument("--lr_warmup_steps",type=int,default=500,)
-    parser.add_argument("--conditioning_dropout_prob",type=float,default=0.1,)
-    parser.add_argument("--use_8bit_adam",action="store_true",)
-    parser.add_argument("--allow_tf32",action="store_true",)
-    parser.add_argument("--use_ema", action="store_true",)
-    parser.add_argument("--non_ema_revision",type=str,default=None,required=False,)
-    parser.add_argument("--num_workers",type=int,default=8,)
-    parser.add_argument("--adam_beta1",type=float,default=0.9,)
-    parser.add_argument("--adam_beta2",type=float,default=0.999,)
-    parser.add_argument("--adam_weight_decay", type=float, default=1e-2,)
-    parser.add_argument("--adam_epsilon",type=float,default=1e-08,)
-    parser.add_argument("--max_grad_norm", default=1.0, type=float,)
-    parser.add_argument("--push_to_hub",action="store_true",)
-    parser.add_argument("--hub_token",type=str,default=None,)
-    parser.add_argument("--hub_model_id",type=str,default=None,)
-    parser.add_argument("--logging_dir",type=str,default="logs",)
-    parser.add_argument("--mixed_precision",type=str,default=None,choices=["no", "fp16", "bf16"],)
-    parser.add_argument("--report_to",type=str,default="tensorboard",)
-    parser.add_argument("--local_rank",type=int,default=-1,)
-    parser.add_argument("--checkpointing_steps",type=int,default=500,)
-    parser.add_argument("--checkpoints_total_limit",type=int,default=2,)
-    parser.add_argument("--resume_from_checkpoint",type=str,default=None,)
-    parser.add_argument("--enable_xformers_memory_efficient_attention",action="store_true",)
-    parser.add_argument("--pretrain_unet",type=str,default=None,)
-    parser.add_argument("--split_ratio",type=float,default=0.99,)
+    parser.add_argument(
+        "--max_train_steps",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--gradient_accumulation_steps",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
+        "--gradient_checkpointing",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--learning_rate",
+        type=float,
+        default=1e-4,
+    )
+    parser.add_argument(
+        "--scale_lr",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--lr_scheduler",
+        type=str,
+        default="constant",
+    )
+    parser.add_argument(
+        "--lr_warmup_steps",
+        type=int,
+        default=500,
+    )
+    parser.add_argument(
+        "--conditioning_dropout_prob",
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
+        "--use_8bit_adam",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--allow_tf32",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--use_ema",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--non_ema_revision",
+        type=str,
+        default=None,
+        required=False,
+    )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=8,
+    )
+    parser.add_argument(
+        "--adam_beta1",
+        type=float,
+        default=0.9,
+    )
+    parser.add_argument(
+        "--adam_beta2",
+        type=float,
+        default=0.999,
+    )
+    parser.add_argument(
+        "--adam_weight_decay",
+        type=float,
+        default=1e-2,
+    )
+    parser.add_argument(
+        "--adam_epsilon",
+        type=float,
+        default=1e-08,
+    )
+    parser.add_argument(
+        "--max_grad_norm",
+        default=1.0,
+        type=float,
+    )
+    parser.add_argument(
+        "--push_to_hub",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--hub_token",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--hub_model_id",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--logging_dir",
+        type=str,
+        default="logs",
+    )
+    parser.add_argument(
+        "--mixed_precision",
+        type=str,
+        default=None,
+        choices=["no", "fp16", "bf16"],
+    )
+    parser.add_argument(
+        "--report_to",
+        type=str,
+        default="tensorboard",
+    )
+    parser.add_argument(
+        "--local_rank",
+        type=int,
+        default=-1,
+    )
+    parser.add_argument(
+        "--checkpointing_steps",
+        type=int,
+        default=500,
+    )
+    parser.add_argument(
+        "--checkpoints_total_limit",
+        type=int,
+        default=2,
+    )
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--enable_xformers_memory_efficient_attention",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--pretrain_unet",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--split_ratio",
+        type=float,
+        default=0.99,
+    )
 
     args = parser.parse_args()
     if args.non_ema_revision is None:
         args.non_ema_revision = args.revision
     return args
+
 
 def download_image(url):
     original_image = (
@@ -312,6 +480,7 @@ def download_image(url):
         )
     )(url)
     return original_image
+
 
 def main():
     args = parse_args()
@@ -354,7 +523,11 @@ def main():
         variant="fp16",
     )
     unet = UNetSpatioTemporalConditionModel.from_pretrained(
-        (args.pretrained_model_name_or_path if args.pretrain_unet is None else args.pretrain_unet),
+        (
+            args.pretrained_model_name_or_path
+            if args.pretrain_unet is None
+            else args.pretrain_unet
+        ),
         subfolder="unet",
         low_cpu_mem_usage=True,
         variant="fp16",
@@ -383,6 +556,7 @@ def main():
     if args.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
             import xformers
+
             xformers_version = version.parse(xformers.__version__)
             if xformers_version == version.parse("0.0.16"):
                 logger.warning("xFormers 0.0.16 has known issues.")
@@ -408,6 +582,7 @@ def main():
     if args.use_8bit_adam:
         try:
             import bitsandbytes as bnb
+
             optimizer_cls = bnb.optim.AdamW8bit
         except ImportError:
             raise ImportError("Install bitsandbytes for 8-bit Adam.")
@@ -513,10 +688,7 @@ def main():
         add_time_ids = add_time_ids.repeat(batch_size, 1)
         return add_time_ids
 
-    total_batch_size = (
-        args.per_gpu_batch_size
-        * args.gradient_accumulation_steps
-    )
+    total_batch_size = args.per_gpu_batch_size * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
@@ -550,10 +722,16 @@ def main():
             full_path = os.path.join(args.output_dir, path)
             checkpoint = torch.load(os.path.join(full_path, "training_state.pt"))
             unet.load_state_dict(torch.load(os.path.join(full_path, "unet.pt")))
-            optimizer.load_state_dict(torch.load(os.path.join(full_path, "optimizer.pt")))
-            lr_scheduler.load_state_dict(torch.load(os.path.join(full_path, "scheduler.pt")))
+            optimizer.load_state_dict(
+                torch.load(os.path.join(full_path, "optimizer.pt"))
+            )
+            lr_scheduler.load_state_dict(
+                torch.load(os.path.join(full_path, "scheduler.pt"))
+            )
             if args.use_ema:
-                ema_unet.load_state_dict(torch.load(os.path.join(full_path, "ema_unet.pt")))
+                ema_unet.load_state_dict(
+                    torch.load(os.path.join(full_path, "ema_unet.pt"))
+                )
 
             global_step = checkpoint["global_step"]
             first_epoch = checkpoint["epoch"]
@@ -569,7 +747,11 @@ def main():
         unet.train()
         train_loss = 0.0
         for step, batch in enumerate(train_dataloader):
-            if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
+            if (
+                args.resume_from_checkpoint
+                and epoch == first_epoch
+                and step < resume_step
+            ):
                 if step % args.gradient_accumulation_steps == 0:
                     progress_bar.update(1)
                 continue
@@ -582,10 +764,12 @@ def main():
             bsz = latents.shape[0]
 
             cond_sigmas = rand_log_normal(
-                shape=[bsz,],
+                shape=[
+                    bsz,
+                ],
                 loc=-3.0,
                 scale=0.5,
-                device=device
+                device=device,
             )
             noise_aug_strength = cond_sigmas[0]
             cond_sigmas = cond_sigmas[:, None, None, None, None]
@@ -593,18 +777,24 @@ def main():
                 torch.randn_like(conditional_pixel_values) * cond_sigmas
                 + conditional_pixel_values
             )
-            conditional_latents = tensor_to_vae_latent(conditional_pixel_values, vae)[:, 0, :, :, :]
+            conditional_latents = tensor_to_vae_latent(conditional_pixel_values, vae)[
+                :, 0, :, :, :
+            ]
             conditional_latents = conditional_latents / vae.config.scaling_factor
 
             sigmas = rand_log_normal(
-                shape=[bsz,],
+                shape=[
+                    bsz,
+                ],
                 loc=0.7,
                 scale=1.6,
-                device=device
+                device=device,
             )
             sigmas = sigmas[:, None, None, None, None]
             noisy_latents = latents + noise * sigmas
-            timesteps = torch.Tensor([0.25 * sigma.log() for sigma in sigmas.reshape(-1)]).to(device)
+            timesteps = torch.Tensor(
+                [0.25 * sigma.log() for sigma in sigmas.reshape(-1)]
+            ).to(device)
 
             inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
             encoder_hidden_states = encode_image(pixel_values[:, 0, :, :, :].float())
@@ -626,16 +816,27 @@ def main():
                 image_mask_dtype = conditional_latents.dtype
                 image_mask = 1 - (
                     (random_p >= args.conditioning_dropout_prob).to(image_mask_dtype)
-                    * (random_p < 3 * args.conditioning_dropout_prob).to(image_mask_dtype)
+                    * (random_p < 3 * args.conditioning_dropout_prob).to(
+                        image_mask_dtype
+                    )
                 )
                 image_mask = image_mask.reshape(bsz, 1, 1, 1)
                 conditional_latents = image_mask * conditional_latents
 
-            conditional_latents = conditional_latents.unsqueeze(1).repeat(1, noisy_latents.shape[1], 1, 1, 1)
-            inp_noisy_latents = torch.cat([inp_noisy_latents, conditional_latents], dim=2)
+            conditional_latents = conditional_latents.unsqueeze(1).repeat(
+                1, noisy_latents.shape[1], 1, 1, 1
+            )
+            inp_noisy_latents = torch.cat(
+                [inp_noisy_latents, conditional_latents], dim=2
+            )
 
             target = latents
-            model_pred = unet(inp_noisy_latents, timesteps, encoder_hidden_states, added_time_ids=added_time_ids).sample
+            model_pred = unet(
+                inp_noisy_latents,
+                timesteps,
+                encoder_hidden_states,
+                added_time_ids=added_time_ids,
+            ).sample
 
             c_out = -sigmas / ((sigmas**2 + 1) ** 0.5)
             c_skip = 1 / (sigmas**2 + 1)
@@ -643,7 +844,9 @@ def main():
             weighing = (1 + sigmas**2) * (sigmas**-2.0)
 
             loss = torch.mean(
-                (weighing.float() * (denoised_latents.float() - target.float()) ** 2).reshape(target.shape[0], -1),
+                (
+                    weighing.float() * (denoised_latents.float() - target.float()) ** 2
+                ).reshape(target.shape[0], -1),
                 dim=1,
             ).mean()
 
@@ -667,9 +870,13 @@ def main():
                 if args.checkpoints_total_limit is not None:
                     checkpoints = os.listdir(args.output_dir)
                     checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
-                    checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
+                    checkpoints = sorted(
+                        checkpoints, key=lambda x: int(x.split("-")[1])
+                    )
                     if len(checkpoints) >= args.checkpoints_total_limit:
-                        num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
+                        num_to_remove = (
+                            len(checkpoints) - args.checkpoints_total_limit + 1
+                        )
                         removing_checkpoints = checkpoints[0:num_to_remove]
                         logger.info(
                             f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints"
@@ -678,17 +885,27 @@ def main():
                             f"removing checkpoints: {', '.join(removing_checkpoints)}"
                         )
                         for removing_checkpoint in removing_checkpoints:
-                            removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
+                            removing_checkpoint = os.path.join(
+                                args.output_dir, removing_checkpoint
+                            )
                             shutil.rmtree(removing_checkpoint)
                 save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                 os.makedirs(save_path, exist_ok=True)
                 torch.save(unet.state_dict(), os.path.join(save_path, "unet.pt"))
-                torch.save(optimizer.state_dict(), os.path.join(save_path, "optimizer.pt"))
-                torch.save(lr_scheduler.state_dict(), os.path.join(save_path, "scheduler.pt"))
+                torch.save(
+                    optimizer.state_dict(), os.path.join(save_path, "optimizer.pt")
+                )
+                torch.save(
+                    lr_scheduler.state_dict(), os.path.join(save_path, "scheduler.pt")
+                )
                 if args.use_ema:
-                    torch.save(ema_unet.state_dict(), os.path.join(save_path, "ema_unet.pt"))
-                torch.save({"global_step": global_step, "epoch": epoch, "resume_step": step},
-                           os.path.join(save_path, "training_state.pt"))
+                    torch.save(
+                        ema_unet.state_dict(), os.path.join(save_path, "ema_unet.pt")
+                    )
+                torch.save(
+                    {"global_step": global_step, "epoch": epoch, "resume_step": step},
+                    os.path.join(save_path, "training_state.pt"),
+                )
                 logger.info(f"Saved state to {save_path}")
 
             # Validation
@@ -702,7 +919,9 @@ def main():
                 val_outputs_current = []
                 for val_step, val_batch in enumerate(val_dataloader):
                     with torch.no_grad():
-                        pixel_values = val_batch["pixel_values"].to(weight_dtype).to(device)
+                        pixel_values = (
+                            val_batch["pixel_values"].to(weight_dtype).to(device)
+                        )
                         conditional_pixel_values = pixel_values[:, 0:1, :, :, :]
 
                         latents = tensor_to_vae_latent(pixel_values, vae)
@@ -710,7 +929,12 @@ def main():
                         bsz = latents.shape[0]
 
                         cond_sigmas = rand_log_normal(
-                            shape=[bsz,], loc=-3.0, scale=0.5, device=device
+                            shape=[
+                                bsz,
+                            ],
+                            loc=-3.0,
+                            scale=0.5,
+                            device=device,
                         )
                         noise_aug_strength = cond_sigmas[0]
                         cond_sigmas = cond_sigmas[:, None, None, None, None]
@@ -718,18 +942,31 @@ def main():
                             torch.randn_like(conditional_pixel_values) * cond_sigmas
                             + conditional_pixel_values
                         )
-                        conditional_latents = tensor_to_vae_latent(conditional_pixel_values, vae)[:, 0, :, :, :]
-                        conditional_latents = conditional_latents / vae.config.scaling_factor
+                        conditional_latents = tensor_to_vae_latent(
+                            conditional_pixel_values, vae
+                        )[:, 0, :, :, :]
+                        conditional_latents = (
+                            conditional_latents / vae.config.scaling_factor
+                        )
 
                         sigmas = rand_log_normal(
-                            shape=[bsz,], loc=0.7, scale=1.6, device=device
+                            shape=[
+                                bsz,
+                            ],
+                            loc=0.7,
+                            scale=1.6,
+                            device=device,
                         )
                         sigmas = sigmas[:, None, None, None, None]
                         noisy_latents = latents + noise * sigmas
-                        timesteps = torch.Tensor([0.25 * sigma.log() for sigma in sigmas.reshape(-1)]).to(device)
+                        timesteps = torch.Tensor(
+                            [0.25 * sigma.log() for sigma in sigmas.reshape(-1)]
+                        ).to(device)
 
                         inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
-                        encoder_hidden_states = encode_image(pixel_values[:, 0, :, :, :].float())
+                        encoder_hidden_states = encode_image(
+                            pixel_values[:, 0, :, :, :].float()
+                        )
                         added_time_ids = _get_add_time_ids(
                             7, 127, noise_aug_strength, encoder_hidden_states.dtype, bsz
                         ).to(device)
@@ -747,17 +984,30 @@ def main():
 
                             image_mask_dtype = conditional_latents.dtype
                             image_mask = 1 - (
-                                (random_p >= args.conditioning_dropout_prob).to(image_mask_dtype)
-                                * (random_p < 3 * args.conditioning_dropout_prob).to(image_mask_dtype)
+                                (random_p >= args.conditioning_dropout_prob).to(
+                                    image_mask_dtype
+                                )
+                                * (random_p < 3 * args.conditioning_dropout_prob).to(
+                                    image_mask_dtype
+                                )
                             )
                             image_mask = image_mask.reshape(bsz, 1, 1, 1)
                             conditional_latents = image_mask * conditional_latents
 
-                        conditional_latents = conditional_latents.unsqueeze(1).repeat(1, noisy_latents.shape[1], 1, 1, 1)
-                        inp_noisy_latents = torch.cat([inp_noisy_latents, conditional_latents], dim=2)
+                        conditional_latents = conditional_latents.unsqueeze(1).repeat(
+                            1, noisy_latents.shape[1], 1, 1, 1
+                        )
+                        inp_noisy_latents = torch.cat(
+                            [inp_noisy_latents, conditional_latents], dim=2
+                        )
 
                         target = latents
-                        model_pred = unet(inp_noisy_latents, timesteps, encoder_hidden_states, added_time_ids=added_time_ids).sample
+                        model_pred = unet(
+                            inp_noisy_latents,
+                            timesteps,
+                            encoder_hidden_states,
+                            added_time_ids=added_time_ids,
+                        ).sample
 
                         c_out = -sigmas / ((sigmas**2 + 1) ** 0.5)
                         c_skip = 1 / (sigmas**2 + 1)
@@ -765,7 +1015,10 @@ def main():
                         weighing = (1 + sigmas**2) * (sigmas**-2.0)
 
                         loss = torch.mean(
-                            (weighing.float() * (denoised_latents.float() - target.float()) ** 2).reshape(target.shape[0], -1),
+                            (
+                                weighing.float()
+                                * (denoised_latents.float() - target.float()) ** 2
+                            ).reshape(target.shape[0], -1),
                             dim=1,
                         ).mean()
 
@@ -800,7 +1053,10 @@ def main():
                 pipeline = pipeline.to(device)
                 pipeline.set_progress_bar_config(disable=True)
 
-                with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=(args.mixed_precision=="fp16")):
+                with torch.autocast(
+                    device.type if device.type != "mps" else "cpu",
+                    enabled=(args.mixed_precision == "fp16"),
+                ):
                     for val_img_idx in range(args.num_validation_images):
                         num_frames = args.num_frames
                         video_frames = pipeline(
@@ -814,7 +1070,9 @@ def main():
                             noise_aug_strength=0.02,
                         ).frames[0]
 
-                        val_save_dir = os.path.join(args.output_dir, "validation_images")
+                        val_save_dir = os.path.join(
+                            args.output_dir, "validation_images"
+                        )
                         if not os.path.exists(val_save_dir):
                             os.makedirs(val_save_dir)
                         out_file = os.path.join(
@@ -861,7 +1119,9 @@ def main():
     if best_val_outputs is not None:
         results_all = {}
         for k in best_val_outputs[0].keys():
-            results_all[k] = np.concatenate([batch[k] for batch in best_val_outputs], axis=0)
+            results_all[k] = np.concatenate(
+                [batch[k] for batch in best_val_outputs], axis=0
+            )
 
         mae = np.mean(np.abs(results_all["preds"] - results_all["trues"]))
         mse = np.mean((results_all["preds"] - results_all["trues"]) ** 2)
@@ -874,6 +1134,7 @@ def main():
             np.save(os.path.join(save_dir, f"{np_data}.npy"), results_all[np_data])
 
         print(f"Best validation MAE: {mae:.4f}, MSE: {mse:.4f}")
+
 
 if __name__ == "__main__":
     main()
