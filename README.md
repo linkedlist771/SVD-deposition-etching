@@ -83,7 +83,7 @@ CUDA_VISIBLE_DEVICES=2 nohup python infer.py \
 ## 4. eval
 ```bash
 CUDA_VISIBLE_DEVICES=0 python eval_metrics.py \
-    --real-dir="data/val" \
+    --real-dir="data" \
     --gen-dir="outputs/val_fine_tune_50000"
 ```
 
